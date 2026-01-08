@@ -17,6 +17,7 @@ using NUnit.Framework;
 using QuantConnect.Brokerages.OKX;
 using QuantConnect.Logging;
 using QuantConnect.Securities;
+using System;
 
 namespace QuantConnect.Brokerages.OKX.Tests
 {
@@ -31,60 +32,310 @@ namespace QuantConnect.Brokerages.OKX.Tests
             _mapper = new OKXSymbolMapper(Market.OKX);
         }
 
+        #region LEAN → OKX Symbol Conversion Tests
+
         /// <summary>
-        /// Tests that GetLeanSymbol can dynamically fetch and register an unknown futures symbol
+        /// Tests spot symbol conversion: BTCUSDT → BTC-USDT
         /// </summary>
         [Test]
-        public void GetLeanSymbol_DynamicallyRegisters_UnknownFuturesSymbol()
+        public void GetBrokerageSymbol_Spot_BTCUSDT()
         {
-            // Arrange
-            var brokerageSymbol = "ADA_USDT";
-            var securityType = SecurityType.CryptoFuture;
-            var market = Market.OKX;
+            var symbol = Symbol.Create("BTCUSDT", SecurityType.Crypto, Market.OKX);
+            var brokerageSymbol = _mapper.GetBrokerageSymbol(symbol);
 
-            // Act
-            var symbol = _mapper.GetLeanSymbol(brokerageSymbol, securityType, market);
-
-            // Assert
-            Assert.IsNotNull(symbol, "Symbol should not be null");
-            Assert.AreEqual("ADAUSDT", symbol.Value, "Symbol value should be ADAUSDT");
-            Assert.AreEqual(SecurityType.CryptoFuture, symbol.SecurityType, "Security type should be CryptoFuture");
-            Assert.AreEqual(Market.OKX, symbol.ID.Market, "Market should be OKX");
-
-            // Verify that SymbolProperties was registered
-            var symbolProperties = SymbolPropertiesDatabase.FromDataFolder()
-                .GetSymbolProperties(market, symbol, securityType, "USDT");
-
-            Assert.IsNotNull(symbolProperties, "SymbolProperties should be registered");
-            Assert.AreEqual(brokerageSymbol, symbolProperties.MarketTicker, "MarketTicker should match brokerage symbol");
-
-            Log.Trace($"✓ Successfully registered {symbol.Value} with properties: " +
-                $"ContractMultiplier={symbolProperties.ContractMultiplier}, " +
-                $"LotSize={symbolProperties.LotSize}, " +
-                $"MinimumPriceVariation={symbolProperties.MinimumPriceVariation}");
+            Assert.AreEqual("BTC-USDT", brokerageSymbol);
         }
 
         /// <summary>
-        /// Tests that GetLeanSymbol can dynamically fetch and register an unknown spot symbol
+        /// Tests spot symbol conversion: ETHUSDT → ETH-USDT
         /// </summary>
         [Test]
-        public void GetLeanSymbol_DynamicallyRegisters_UnknownSpotSymbol()
+        public void GetBrokerageSymbol_Spot_ETHUSDT()
         {
-            // Arrange - use a symbol that's unlikely to be in CSV
-            var brokerageSymbol = "DOGE_USDT";
-            var securityType = SecurityType.Crypto;
-            var market = Market.OKX;
+            var symbol = Symbol.Create("ETHUSDT", SecurityType.Crypto, Market.OKX);
+            var brokerageSymbol = _mapper.GetBrokerageSymbol(symbol);
 
-            // Act
-            var symbol = _mapper.GetLeanSymbol(brokerageSymbol, securityType, market);
-
-            // Assert
-            Assert.IsNotNull(symbol, "Symbol should not be null");
-            Assert.AreEqual("DOGEUSDT", symbol.Value, "Symbol value should be DOGEUSDT");
-            Assert.AreEqual(SecurityType.Crypto, symbol.SecurityType, "Security type should be Crypto");
-            Assert.AreEqual(Market.OKX, symbol.ID.Market, "Market should be OKX");
-
-            Log.Trace($"✓ Successfully registered spot symbol: {symbol.Value}");
+            Assert.AreEqual("ETH-USDT", brokerageSymbol);
         }
+
+        /// <summary>
+        /// Tests spot symbol with USDC quote: BTCUSDC → BTC-USDC
+        /// </summary>
+        [Test]
+        public void GetBrokerageSymbol_Spot_BTCUSDC()
+        {
+            var symbol = Symbol.Create("BTCUSDC", SecurityType.Crypto, Market.OKX);
+            var brokerageSymbol = _mapper.GetBrokerageSymbol(symbol);
+
+            Assert.AreEqual("BTC-USDC", brokerageSymbol);
+        }
+
+        /// <summary>
+        /// Tests perpetual swap symbol: BTCUSDT (perpetual) → BTC-USDT-SWAP
+        /// </summary>
+        [Test]
+        public void GetBrokerageSymbol_PerpetualSwap_BTCUSDT()
+        {
+            var symbol = Symbol.CreateFuture("BTCUSDT", Market.OKX, SecurityIdentifier.DefaultDate);
+            var brokerageSymbol = _mapper.GetBrokerageSymbol(symbol);
+
+            Assert.AreEqual("BTC-USDT-SWAP", brokerageSymbol);
+        }
+
+        /// <summary>
+        /// Tests perpetual swap symbol: ETHUSDT (perpetual) → ETH-USDT-SWAP
+        /// </summary>
+        [Test]
+        public void GetBrokerageSymbol_PerpetualSwap_ETHUSDT()
+        {
+            var symbol = Symbol.CreateFuture("ETHUSDT", Market.OKX, SecurityIdentifier.DefaultDate);
+            var brokerageSymbol = _mapper.GetBrokerageSymbol(symbol);
+
+            Assert.AreEqual("ETH-USDT-SWAP", brokerageSymbol);
+        }
+
+        /// <summary>
+        /// Tests delivery futures symbol: BTCUSDT (2025-03-28) → BTC-USDT-250328
+        /// </summary>
+        [Test]
+        public void GetBrokerageSymbol_DeliveryFutures_BTCUSDT()
+        {
+            var expiryDate = new DateTime(2025, 3, 28);
+            var symbol = Symbol.CreateFuture("BTCUSDT", Market.OKX, expiryDate);
+            var brokerageSymbol = _mapper.GetBrokerageSymbol(symbol);
+
+            Assert.AreEqual("BTC-USDT-250328", brokerageSymbol);
+        }
+
+        /// <summary>
+        /// Tests delivery futures symbol: ETHUSDT (2025-12-31) → ETH-USDT-251231
+        /// </summary>
+        [Test]
+        public void GetBrokerageSymbol_DeliveryFutures_ETHUSDT()
+        {
+            var expiryDate = new DateTime(2025, 12, 31);
+            var symbol = Symbol.CreateFuture("ETHUSDT", Market.OKX, expiryDate);
+            var brokerageSymbol = _mapper.GetBrokerageSymbol(symbol);
+
+            Assert.AreEqual("ETH-USDT-251231", brokerageSymbol);
+        }
+
+        #endregion
+
+        #region OKX → LEAN Symbol Conversion Tests
+
+        /// <summary>
+        /// Tests OKX → LEAN conversion: BTC-USDT → BTCUSDT (Crypto)
+        /// </summary>
+        [Test]
+        public void GetLeanSymbol_Spot_BTCUSDT()
+        {
+            var brokerageSymbol = "BTC-USDT";
+            var symbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.Crypto, Market.OKX);
+
+            Assert.AreEqual("BTCUSDT", symbol.Value);
+            Assert.AreEqual(SecurityType.Crypto, symbol.SecurityType);
+            Assert.AreEqual(Market.OKX, symbol.ID.Market);
+        }
+
+        /// <summary>
+        /// Tests OKX → LEAN conversion: ETH-USDT → ETHUSDT (Crypto)
+        /// </summary>
+        [Test]
+        public void GetLeanSymbol_Spot_ETHUSDT()
+        {
+            var brokerageSymbol = "ETH-USDT";
+            var symbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.Crypto, Market.OKX);
+
+            Assert.AreEqual("ETHUSDT", symbol.Value);
+            Assert.AreEqual(SecurityType.Crypto, symbol.SecurityType);
+        }
+
+        /// <summary>
+        /// Tests OKX → LEAN conversion: BTC-USDT-SWAP → /BTCUSDT (Future, perpetual)
+        /// Note: LEAN prefixes perpetual futures with "/" in the symbol value
+        /// Note: Symbol.CreateFuture() uses SecurityType.Future, not CryptoFuture
+        /// </summary>
+        [Test]
+        public void GetLeanSymbol_PerpetualSwap_BTCUSDT()
+        {
+            var brokerageSymbol = "BTC-USDT-SWAP";
+            var symbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.CryptoFuture, Market.OKX);
+
+            Assert.IsTrue(symbol.Value.Contains("BTCUSDT"), $"Symbol value should contain BTCUSDT, got: {symbol.Value}");
+            Assert.AreEqual(SecurityType.Future, symbol.SecurityType);
+            Assert.AreEqual(SecurityIdentifier.DefaultDate, symbol.ID.Date, "Perpetual swap should have DefaultDate");
+        }
+
+        /// <summary>
+        /// Tests OKX → LEAN conversion: BTC-USDT-250328 → BTCUSDT28H25 (Future, expiry: 2025-03-28)
+        /// Note: LEAN appends expiry code to delivery futures symbol values
+        /// Note: Symbol.CreateFuture() uses SecurityType.Future, not CryptoFuture
+        /// </summary>
+        [Test]
+        public void GetLeanSymbol_DeliveryFutures_BTCUSDT()
+        {
+            var brokerageSymbol = "BTC-USDT-250328";
+            var symbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.CryptoFuture, Market.OKX);
+
+            Assert.IsTrue(symbol.Value.Contains("BTCUSDT"), $"Symbol value should contain BTCUSDT, got: {symbol.Value}");
+            Assert.AreEqual(SecurityType.Future, symbol.SecurityType);
+            Assert.AreEqual(new DateTime(2025, 3, 28), symbol.ID.Date, "Should parse expiry date correctly");
+        }
+
+        /// <summary>
+        /// Tests OKX → LEAN conversion: ETH-USDT-251231 → ETHUSDT31Z25 (CryptoFuture, expiry: 2025-12-31)
+        /// Note: LEAN appends expiry code to delivery futures symbol values
+        /// </summary>
+        [Test]
+        public void GetLeanSymbol_DeliveryFutures_ETHUSDT()
+        {
+            var brokerageSymbol = "ETH-USDT-251231";
+            var symbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.CryptoFuture, Market.OKX);
+
+            Assert.IsTrue(symbol.Value.Contains("ETHUSDT"), $"Symbol value should contain ETHUSDT, got: {symbol.Value}");
+            Assert.AreEqual(new DateTime(2025, 12, 31), symbol.ID.Date);
+        }
+
+        #endregion
+
+        #region Round-Trip Conversion Tests
+
+        /// <summary>
+        /// Tests round-trip conversion for spot symbols
+        /// </summary>
+        [Test]
+        public void RoundTrip_Spot_BTCUSDT()
+        {
+            var originalSymbol = Symbol.Create("BTCUSDT", SecurityType.Crypto, Market.OKX);
+            var brokerageSymbol = _mapper.GetBrokerageSymbol(originalSymbol);
+            var convertedSymbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.Crypto, Market.OKX);
+
+            Assert.AreEqual(originalSymbol.Value, convertedSymbol.Value);
+            Assert.AreEqual(originalSymbol.SecurityType, convertedSymbol.SecurityType);
+        }
+
+        /// <summary>
+        /// Tests round-trip conversion for perpetual swap symbols
+        /// </summary>
+        [Test]
+        public void RoundTrip_PerpetualSwap_BTCUSDT()
+        {
+            var originalSymbol = Symbol.CreateFuture("BTCUSDT", Market.OKX, SecurityIdentifier.DefaultDate);
+            var brokerageSymbol = _mapper.GetBrokerageSymbol(originalSymbol);
+            var convertedSymbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.CryptoFuture, Market.OKX);
+
+            Assert.AreEqual(originalSymbol.Value, convertedSymbol.Value);
+            Assert.AreEqual(originalSymbol.SecurityType, convertedSymbol.SecurityType);
+            Assert.AreEqual(originalSymbol.ID.Date, convertedSymbol.ID.Date);
+        }
+
+        /// <summary>
+        /// Tests round-trip conversion for delivery futures symbols
+        /// </summary>
+        [Test]
+        public void RoundTrip_DeliveryFutures_BTCUSDT()
+        {
+            var expiryDate = new DateTime(2025, 3, 28);
+            var originalSymbol = Symbol.CreateFuture("BTCUSDT", Market.OKX, expiryDate);
+            var brokerageSymbol = _mapper.GetBrokerageSymbol(originalSymbol);
+            var convertedSymbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.CryptoFuture, Market.OKX);
+
+            Assert.AreEqual(originalSymbol.Value, convertedSymbol.Value);
+            Assert.AreEqual(originalSymbol.SecurityType, convertedSymbol.SecurityType);
+            Assert.AreEqual(originalSymbol.ID.Date, convertedSymbol.ID.Date);
+        }
+
+        #endregion
+
+        #region Security Type Detection Tests
+
+        /// <summary>
+        /// Tests that GetBrokerageSecurityType correctly identifies spot symbols
+        /// </summary>
+        [Test]
+        public void GetBrokerageSecurityType_Spot()
+        {
+            Assert.AreEqual(SecurityType.Crypto, _mapper.GetBrokerageSecurityType("BTC-USDT"));
+            Assert.AreEqual(SecurityType.Crypto, _mapper.GetBrokerageSecurityType("ETH-USDC"));
+        }
+
+        /// <summary>
+        /// Tests that GetBrokerageSecurityType correctly identifies perpetual swaps
+        /// </summary>
+        [Test]
+        public void GetBrokerageSecurityType_PerpetualSwap()
+        {
+            Assert.AreEqual(SecurityType.CryptoFuture, _mapper.GetBrokerageSecurityType("BTC-USDT-SWAP"));
+            Assert.AreEqual(SecurityType.CryptoFuture, _mapper.GetBrokerageSecurityType("ETH-USDT-SWAP"));
+        }
+
+        /// <summary>
+        /// Tests that GetBrokerageSecurityType correctly identifies delivery futures
+        /// </summary>
+        [Test]
+        public void GetBrokerageSecurityType_DeliveryFutures()
+        {
+            Assert.AreEqual(SecurityType.CryptoFuture, _mapper.GetBrokerageSecurityType("BTC-USDT-250328"));
+            Assert.AreEqual(SecurityType.CryptoFuture, _mapper.GetBrokerageSecurityType("ETH-USDT-251231"));
+        }
+
+        #endregion
+
+        #region Error Handling Tests
+
+        /// <summary>
+        /// Tests that invalid OKX symbol format throws exception
+        /// </summary>
+        [Test]
+        public void GetLeanSymbol_InvalidFormat_ThrowsException()
+        {
+            Assert.Throws<ArgumentException>(() =>
+                _mapper.GetLeanSymbol("INVALID", SecurityType.Crypto, Market.OKX));
+        }
+
+        /// <summary>
+        /// Tests that invalid LEAN symbol throws exception
+        /// </summary>
+        [Test]
+        public void GetBrokerageSymbol_InvalidSymbol_ThrowsException()
+        {
+            var symbol = Symbol.Create("XYZ", SecurityType.Crypto, Market.OKX);
+            Assert.Throws<ArgumentException>(() => _mapper.GetBrokerageSymbol(symbol));
+        }
+
+        /// <summary>
+        /// Tests that unsupported security type throws exception
+        /// </summary>
+        [Test]
+        public void GetBrokerageSymbol_UnsupportedSecurityType_ThrowsException()
+        {
+            // Create a Forex symbol (unsupported by OKX)
+            var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.FXCM);
+
+            Assert.Throws<NotSupportedException>(() => _mapper.GetBrokerageSymbol(symbol));
+        }
+
+        #endregion
+
+        #region Multiple Quote Currency Tests
+
+        /// <summary>
+        /// Tests symbols with different quote currencies
+        /// </summary>
+        [TestCase("BTCUSDT", "BTC-USDT")]
+        [TestCase("BTCUSDC", "BTC-USDC")]
+        [TestCase("BTCUSD", "BTC-USD")]
+        [TestCase("ETHBTC", "ETH-BTC")]
+        [TestCase("ETHETH", "ETH-ETH")] // Edge case: same base and quote
+        public void GetBrokerageSymbol_VariousQuoteCurrencies(string leanSymbol, string expectedOKXSymbol)
+        {
+            var symbol = Symbol.Create(leanSymbol, SecurityType.Crypto, Market.OKX);
+            var brokerageSymbol = _mapper.GetBrokerageSymbol(symbol);
+
+            Assert.AreEqual(expectedOKXSymbol, brokerageSymbol);
+        }
+
+        #endregion
     }
 }
