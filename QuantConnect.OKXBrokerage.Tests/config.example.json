@@ -1,0 +1,6 @@
+{
+  "data-folder": "../../../../Lean/Data/",
+  "gate-api-secret": "YOUR_API_SECRET",
+  "gate-api-key": "YOUR_API_KEY",
+  "gate-environment": "testnet"
+}

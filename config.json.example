@@ -1,0 +1,8 @@
+{
+  "data-folder": "../../../../Lean/Data/",
+  "okx-api-key": "your-api-key-here",
+  "okx-api-secret": "your-api-secret-here",
+  "okx-passphrase": "your-passphrase-here",
+  "okx-environment": "live",
+  "okx-unified-account-mode": "cash"
+}

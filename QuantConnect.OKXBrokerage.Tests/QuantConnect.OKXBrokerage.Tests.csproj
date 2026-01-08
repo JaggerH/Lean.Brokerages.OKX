@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+        <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+        <TargetFramework>net10.0</TargetFramework>
+
+        <IsPackable>false</IsPackable>
+        <Copyright>Copyright ©  2021</Copyright>
+        <TestProjectType>UnitTest</TestProjectType>
+        <OutputPath>bin\$(Configuration)\</OutputPath>
+        <Product>QuantConnect.Brokerages.OKX.Tests</Product>
+        <AssemblyName>QuantConnect.Brokerages.OKX.Tests</AssemblyName>
+        <RootNamespace>QuantConnect.Brokerages.OKX.Tests</RootNamespace>
+        <AssemblyTitle>QuantConnect.Brokerages.OKX.Tests</AssemblyTitle>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Fleck is only used for Debug/integration tests with MockOKXWebSocketServer -->
+        <PackageReference Include="Fleck" Version="1.2.0" Condition="'$(Configuration)' == 'Debug'" />
+        <PackageReference Include="Moq" Version="4.20.72" />
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
+        <PackageReference Include="NUnit" Version="4.2.2" />
+        <PackageReference Include="NUnit3TestAdapter" Version="4.6.0">
+            <PrivateAssets>all</PrivateAssets>
+        </PackageReference>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.9.4" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Using Include="NUnit.Framework.Legacy.ClassicAssert" Alias="Assert" />
+    </ItemGroup>
+    <ItemGroup>
+      <ProjectReference Include="..\..\Lean\Tests\QuantConnect.Tests.csproj" />
+      <ProjectReference Include="..\QuantConnect.OKXBrokerage.ToolBox\QuantConnect.OKXBrokerage.ToolBox.csproj" />
+      <ProjectReference Include="..\QuantConnect.OKXBrokerage\QuantConnect.OKXBrokerage.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Remove="config.json" />
+        <Content Include="config.json">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+    </ItemGroup>
+
+    <!-- Exclude MockOKXWebSocketServer and reconnection tests from Release builds -->
+    <!-- Debug builds automatically include all .cs files by default -->
+    <ItemGroup Condition="'$(Configuration)' == 'Release'">
+        <Compile Remove="Mocks\MockOKXWebSocketServer.cs" />
+        <Compile Remove="OKXBrokerageReconnectionTests.New.cs" />
+    </ItemGroup>
+</Project>

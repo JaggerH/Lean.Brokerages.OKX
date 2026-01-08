@@ -1,0 +1,14 @@
+{
+  "description": "Lean.Brokerages.OKX 项目权限配置",
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash"
+    ],
+    "ask": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(rm:*)"
+    ]
+  }
+}
