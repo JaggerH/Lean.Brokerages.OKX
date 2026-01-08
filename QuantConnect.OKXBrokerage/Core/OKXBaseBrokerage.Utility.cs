@@ -165,26 +165,26 @@ namespace QuantConnect.Brokerages.OKX
         // TIME CONVERSIONS
         // ========================================
 
-        private static readonly DateTime UnixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-
         /// <summary>
         /// Converts Unix timestamp (seconds) to DateTime
+        /// Uses DateTimeOffset for reliable UTC conversion
         /// </summary>
         /// <param name="seconds">Unix timestamp in seconds</param>
-        /// <returns>DateTime</returns>
+        /// <returns>DateTime in UTC</returns>
         public static DateTime UnixSecondsToDateTime(long seconds)
         {
-            return UnixEpoch.AddSeconds(seconds);
+            return DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime;
         }
 
         /// <summary>
         /// Converts Unix timestamp (milliseconds) to DateTime
+        /// Uses DateTimeOffset for reliable UTC conversion
         /// </summary>
         /// <param name="milliseconds">Unix timestamp in milliseconds</param>
-        /// <returns>DateTime</returns>
+        /// <returns>DateTime in UTC</returns>
         public static DateTime UnixMillisecondsToDateTime(long milliseconds)
         {
-            return UnixEpoch.AddMilliseconds(milliseconds);
+            return DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime;
         }
 
         /// <summary>
@@ -194,7 +194,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <returns>Unix timestamp in seconds</returns>
         public static long DateTimeToUnixSeconds(DateTime dateTime)
         {
-            return (long)(dateTime - UnixEpoch).TotalSeconds;
+            return new DateTimeOffset(dateTime).ToUnixTimeSeconds();
         }
 
         /// <summary>
@@ -204,7 +204,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <returns>Unix timestamp in milliseconds</returns>
         public static long DateTimeToUnixMilliseconds(DateTime dateTime)
         {
-            return (long)(dateTime - UnixEpoch).TotalMilliseconds;
+            return new DateTimeOffset(dateTime).ToUnixTimeMilliseconds();
         }
 
         // ========================================

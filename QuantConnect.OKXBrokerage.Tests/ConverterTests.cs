@@ -122,8 +122,8 @@ namespace QuantConnect.Brokerages.OKX.Tests
         [Test]
         public void DateTimeConverter_ValidTimestamp_ReturnsDateTime()
         {
-            // 2020-08-10 00:33:03 UTC = 1597026383085 ms
-            var json = "{ \"timestamp\": \"1597026383085\" }";
+            // 2020-08-10 00:33:03 UTC = 1597019583085 ms
+            var json = "{ \"timestamp\": \"1597019583085\" }";
             var result = JsonConvert.DeserializeObject<TestDateTimeClass>(json);
 
             var expected = new DateTime(2020, 8, 10, 0, 33, 3, 85, DateTimeKind.Utc);
@@ -193,7 +193,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             var obj = new TestDateTimeClass { Timestamp = timestamp };
             var json = JsonConvert.SerializeObject(obj);
 
-            Assert.IsTrue(json.Contains("\"1597026383085\""));
+            Assert.IsTrue(json.Contains("\"1597019583085\""));
         }
 
         #endregion
@@ -206,7 +206,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         [Test]
         public void UnixSecondsToDateTime_ValidTimestamp_ReturnsCorrectDateTime()
         {
-            var timestamp = 1597026383L; // 2020-08-10 00:33:03 UTC
+            var timestamp = 1597019583L; // 2020-08-10 00:33:03 UTC
             var result = OKXUtility.UnixSecondsToDateTime(timestamp);
 
             var expected = new DateTime(2020, 8, 10, 0, 33, 3, DateTimeKind.Utc);
@@ -227,7 +227,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         [Test]
         public void UnixMillisecondsToDateTime_ValidTimestamp_ReturnsCorrectDateTime()
         {
-            var timestamp = 1597026383085L; // 2020-08-10 00:33:03.085 UTC
+            var timestamp = 1597019583085L; // 2020-08-10 00:33:03.085 UTC
             var result = OKXUtility.UnixMillisecondsToDateTime(timestamp);
 
             var expected = new DateTime(2020, 8, 10, 0, 33, 3, 85, DateTimeKind.Utc);
@@ -243,7 +243,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             var dateTime = new DateTime(2020, 8, 10, 0, 33, 3, DateTimeKind.Utc);
             var result = OKXUtility.DateTimeToUnixSeconds(dateTime);
 
-            Assert.AreEqual(1597026383L, result);
+            Assert.AreEqual(1597019583L, result);
         }
 
         /// <summary>
@@ -255,7 +255,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             var dateTime = new DateTime(2020, 8, 10, 0, 33, 3, 85, DateTimeKind.Utc);
             var result = OKXUtility.DateTimeToUnixMilliseconds(dateTime);
 
-            Assert.AreEqual(1597026383085L, result);
+            Assert.AreEqual(1597019583085L, result);
         }
 
         /// <summary>
