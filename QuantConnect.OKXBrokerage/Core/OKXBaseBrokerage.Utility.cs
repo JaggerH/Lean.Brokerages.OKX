@@ -50,12 +50,28 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Generates HMAC-SHA512 signature
+        /// Generates HMAC-SHA256 signature for OKX REST API
+        /// OKX uses Base64 encoding (not Hex)
+        /// </summary>
+        /// <param name="message">Message to sign</param>
+        /// <param name="secret">Secret key</param>
+        /// <returns>Base64-encoded signature string</returns>
+        public static string GenerateHmacSignature(string message, string secret)
+        {
+            using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret)))
+            {
+                var hashBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(message));
+                return Convert.ToBase64String(hashBytes);
+            }
+        }
+
+        /// <summary>
+        /// Generates HMAC-SHA512 signature (legacy, for Gate.io compatibility)
         /// </summary>
         /// <param name="message">Message to sign</param>
         /// <param name="secret">Secret key</param>
         /// <returns>Hex-encoded signature string</returns>
-        public static string GenerateHmacSignature(string message, string secret)
+        public static string GenerateHmacSha512Signature(string message, string secret)
         {
             using (var hmac = new HMACSHA512(Encoding.UTF8.GetBytes(secret)))
             {

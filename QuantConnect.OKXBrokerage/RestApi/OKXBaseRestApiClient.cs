@@ -24,6 +24,7 @@ using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Securities;
+using QuantConnect.Util;
 using RestSharp;
 
 namespace QuantConnect.Brokerages.OKX.RestApi
@@ -46,6 +47,12 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         protected readonly string _restApiUrl;
         protected readonly RestClient _restClient;
         protected readonly ISymbolMapper _symbolMapper;
+
+        // Rate limiters for OKX API v5
+        // Based on OKX API documentation: https://www.okx.com/docs-v5/en/#overview-rate-limit
+        private readonly RateGate _orderRateLimiter;     // Trading endpoints rate limit
+        private readonly RateGate _accountRateLimiter;   // Account endpoints rate limit
+        private readonly RateGate _publicRateLimiter;    // Public data endpoints rate limit
 
         // Time synchronization
         // Set once during initialization in SyncServerTime(), no concurrent writes
@@ -90,6 +97,14 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             _restClient = new RestClient(restApiUrl);
             _symbolMapper = new OKXSymbolMapper(Market.OKX);
 
+            // Initialize rate limiters for OKX API v5
+            // Trading endpoints: 60 requests per 2 seconds (conservative estimate)
+            _orderRateLimiter = new RateGate(60, TimeSpan.FromSeconds(2));
+            // Account endpoints: 10 requests per 2 seconds
+            _accountRateLimiter = new RateGate(10, TimeSpan.FromSeconds(2));
+            // Public data endpoints: 20 requests per 2 seconds
+            _publicRateLimiter = new RateGate(20, TimeSpan.FromSeconds(2));
+
             SyncServerTime();
         }
 
@@ -99,22 +114,24 @@ namespace QuantConnect.Brokerages.OKX.RestApi
 
         /// <summary>
         /// Gets the current server time from OKX
-        /// https://www.okx.io/docs/developers/apiv4/en/#get-server-current-time
+        /// https://www.okx.com/docs-v5/en/#rest-api-public-data-get-system-time
         /// No authentication required
-        /// Note: This is a global endpoint (/spot/time) shared by both Spot and Futures clients
-        /// Must use absolute path to avoid ApiPrefix interference
         /// </summary>
-        /// <returns>Server time in seconds (Unix timestamp), or null if request fails</returns>
+        /// <returns>Server time in milliseconds (Unix timestamp), or null if request fails</returns>
         public virtual long? GetServerTime()
         {
-            // /spot/time is a global endpoint - use absolute path to bypass ApiPrefix
-            // RestClient will prepend base URL (testnet or live), resulting in:
-            // https://api-testnet.okxapi.io/api/v4/spot/time (testnet) or
-            // https://api.okxio.ws/api/v4/spot/time (live)
-            var request = new RestRequest("/spot/time", Method.GET);
+            // OKX v5 API: GET /api/v5/public/time
+            var request = new RestRequest("/api/v5/public/time", Method.GET);
             var response = ExecuteRestRequest(request);
-            var result = DeserializeOrDefault<ServerTime>(response, nameof(GetServerTime));
-            return result?.ServerTimeSeconds;
+            var result = DeserializeOrDefault<OKXApiResponse<ServerTime>>(response, nameof(GetServerTime));
+
+            if (result == null || !result.IsSuccess || result.Data == null || result.Data.Count == 0)
+            {
+                Log.Error($"OKXBaseRestApiClient.GetServerTime(): Invalid response - code: {result?.Code}, msg: {result?.Message}");
+                return null;
+            }
+
+            return result.Data[0].ServerTimeSeconds;
         }
 
         /// <summary>
@@ -169,20 +186,16 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         // ========================================
 
         /// <summary>
-        /// Generates a nonce for API requests
-        /// OKX uses Unix timestamp with decimal precision (seconds.milliseconds)
-        /// Matching Python SDK format: str(time.time()) => "1727724883.5861704"
+        /// Generates a timestamp for API requests
+        /// OKX v5 API uses Unix milliseconds timestamp as ISO 8601 string
+        /// Example: "1597026383085"
         /// </summary>
         protected string GetNonce()
         {
             // Get current time with dynamic offset applied
             // No locking needed - _timeOffsetMs is set once during initialization
             var now = DateTimeOffset.UtcNow.AddMilliseconds(_timeOffsetMs);
-            var timestampMs = now.ToUnixTimeMilliseconds();
-            var timestamp = timestampMs / 1000.0;
-
-            // Format to string with 6 decimal places (matching Python SDK)
-            return timestamp.ToString("F6", CultureInfo.InvariantCulture);
+            return now.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
         }
 
         /// <summary>
@@ -196,40 +209,43 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         }
 
         /// <summary>
-        /// Signs a REST API request according to OKX authentication requirements
-        /// https://www.okx.io/docs/developers/apiv4/en/#authentication
+        /// Signs a REST API request according to OKX v5 authentication requirements
+        /// https://www.okx.com/docs-v5/en/#rest-api-authentication
         ///
-        /// OKX Signature Process:
-        /// 1. Generate signature string: HTTP_METHOD\nURL_PATH\nQUERY_STRING\nHASHED_PAYLOAD\nTIMESTAMP
-        /// 2. Sign with HMAC-SHA512 using API secret
-        /// 3. Convert to hex string
+        /// OKX v5 Signature Process:
+        /// 1. Generate signature string: timestamp + method + requestPath + body
+        /// 2. Sign with HMAC-SHA256 using API secret
+        /// 3. Convert to Base64 string
         /// </summary>
         /// <param name="request">The REST request to sign</param>
-        /// <param name="endpoint">API endpoint path (e.g., "/api/v4/spot/orders")</param>
-        /// <param name="queryString">Query string parameters (for GET requests)</param>
+        /// <param name="endpoint">API endpoint path (e.g., "/api/v5/account/balance")</param>
+        /// <param name="queryString">Query string parameters (for GET requests, include "?" prefix)</param>
         /// <param name="body">Request body JSON (for POST/DELETE requests)</param>
         protected void SignRequest(IRestRequest request, string endpoint, string queryString = "", string body = "")
         {
             var timestamp = GetNonce();
 
-            // Calculate SHA512 hash of request body
-            // IMPORTANT: Must always hash, even for empty body (matching OKX Python SDK)
-            var hashedPayload = OKXUtility.ComputeSha512Hash(body ?? string.Empty);
+            // Build request path (endpoint + query string if present)
+            var requestPath = endpoint;
+            if (!string.IsNullOrEmpty(queryString))
+            {
+                // Ensure query string starts with "?"
+                requestPath = queryString.StartsWith("?") ? endpoint + queryString : endpoint + "?" + queryString;
+            }
 
-            // For signature, we need the full path including /api/v4
-            // endpoint comes in as "/spot/accounts", we need "/api/v4/spot/accounts" for signature
-            var signaturePath = endpoint.StartsWith("/api/v4") ? endpoint : $"/api/v4{endpoint}";
+            // Build signature string: timestamp + method + requestPath + body
+            var method = request.Method.ToString().ToUpperInvariant();
+            var signatureString = timestamp + method + requestPath + (body ?? string.Empty);
 
-            // Build signature string
-            var signatureString = $"{request.Method.ToString().ToUpperInvariant()}\n{signaturePath}\n{queryString}\n{hashedPayload}\n{timestamp}";
-
-            // Generate signature using HMAC-SHA512
+            // Generate signature using HMAC-SHA256
             var signature = OKXUtility.GenerateHmacSignature(signatureString, _apiSecret);
 
-            // Add required headers
-            request.AddHeader("KEY", _apiKey);
-            request.AddHeader("Timestamp", timestamp);
-            request.AddHeader("SIGN", signature);
+            // Add required OKX v5 headers
+            request.AddHeader("OK-ACCESS-KEY", _apiKey);
+            request.AddHeader("OK-ACCESS-SIGN", signature);
+            request.AddHeader("OK-ACCESS-TIMESTAMP", timestamp);
+            request.AddHeader("OK-ACCESS-PASSPHRASE", _passphrase);
+            request.AddHeader("Content-Type", "application/json");
         }
 
         // ========================================

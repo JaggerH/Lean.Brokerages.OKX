@@ -101,5 +101,170 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             // TODO: Implement GetRiskLimitTiers for OKX
             return new List<RiskLimitTier>();
         }
+
+        /// <summary>
+        /// Gets available instruments (trading pairs) from OKX
+        /// https://www.okx.com/docs-v5/en/#rest-api-public-data-get-instruments
+        /// No authentication required
+        /// </summary>
+        /// <param name="instType">Instrument type: SPOT, MARGIN, SWAP, FUTURES, OPTION</param>
+        /// <returns>List of instruments, or empty list if request fails</returns>
+        public List<Instrument> GetInstruments(string instType = "SPOT")
+        {
+            try
+            {
+                var queryString = $"instType={instType}";
+                var response = GetPublic<OKXApiResponse<Instrument>>(
+                    "/public/instruments",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess)
+                {
+                    Log.Error($"OKXRestApiClient.GetInstruments(): Failed to get instruments - code: {response?.Code}, msg: {response?.Message}");
+                    return new List<Instrument>();
+                }
+
+                return response.Data ?? new List<Instrument>();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetInstruments(): Exception: {ex.Message}");
+                return new List<Instrument>();
+            }
+        }
+
+        /// <summary>
+        /// Gets ticker information for a specific instrument
+        /// https://www.okx.com/docs-v5/en/#rest-api-market-data-get-ticker
+        /// No authentication required
+        /// </summary>
+        /// <param name="instId">Instrument ID (e.g., BTC-USDT)</param>
+        /// <returns>Ticker information, or null if request fails</returns>
+        public Ticker GetTickerInfo(string instId)
+        {
+            try
+            {
+                var queryString = $"instId={instId}";
+                var response = GetPublic<OKXApiResponse<Ticker>>(
+                    "/market/ticker",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess || response.Data == null || response.Data.Count == 0)
+                {
+                    Log.Error($"OKXRestApiClient.GetTickerInfo(): Failed to get ticker - code: {response?.Code}, msg: {response?.Message}");
+                    return null;
+                }
+
+                return response.Data[0];
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetTickerInfo(): Exception: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets account configuration
+        /// https://www.okx.com/docs-v5/en/#rest-api-account-get-account-configuration
+        /// Requires authentication
+        /// </summary>
+        /// <returns>Account configuration, or null if request fails</returns>
+        public AccountConfig GetAccountConfiguration()
+        {
+            try
+            {
+                var response = Get<OKXApiResponse<AccountConfig>>(
+                    "/account/config",
+                    queryString: "",
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess || response.Data == null || response.Data.Count == 0)
+                {
+                    Log.Error($"OKXRestApiClient.GetAccountConfiguration(): Failed to get config - code: {response?.Code}, msg: {response?.Message}");
+                    return null;
+                }
+
+                return response.Data[0];
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetAccountConfiguration(): Exception: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets account balance
+        /// https://www.okx.com/docs-v5/en/#rest-api-account-get-balance
+        /// Requires authentication
+        /// </summary>
+        /// <param name="currency">Currency to query (optional, empty for all)</param>
+        /// <returns>Account balance, or null if request fails</returns>
+        public AccountBalance GetAccountBalance(string currency = "")
+        {
+            try
+            {
+                var queryString = string.IsNullOrEmpty(currency) ? "" : $"ccy={currency}";
+                var response = Get<OKXApiResponse<AccountBalance>>(
+                    "/account/balance",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess || response.Data == null || response.Data.Count == 0)
+                {
+                    Log.Error($"OKXRestApiClient.GetAccountBalance(): Failed to get balance - code: {response?.Code}, msg: {response?.Message}");
+                    return null;
+                }
+
+                return response.Data[0];
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetAccountBalance(): Exception: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets account positions
+        /// https://www.okx.com/docs-v5/en/#rest-api-account-get-positions
+        /// Requires authentication
+        /// </summary>
+        /// <param name="instType">Instrument type (optional): MARGIN, SWAP, FUTURES, OPTION</param>
+        /// <param name="instId">Instrument ID (optional)</param>
+        /// <returns>List of positions, or empty list if request fails</returns>
+        public List<Position> GetAccountPositions(string instType = "", string instId = "")
+        {
+            try
+            {
+                var queryParams = new List<string>();
+                if (!string.IsNullOrEmpty(instType))
+                    queryParams.Add($"instType={instType}");
+                if (!string.IsNullOrEmpty(instId))
+                    queryParams.Add($"instId={instId}");
+
+                var queryString = string.Join("&", queryParams);
+                var response = Get<OKXApiResponse<Position>>(
+                    "/account/positions",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess)
+                {
+                    Log.Error($"OKXRestApiClient.GetAccountPositions(): Failed to get positions - code: {response?.Code}, msg: {response?.Message}");
+                    return new List<Position>();
+                }
+
+                return response.Data ?? new List<Position>();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetAccountPositions(): Exception: {ex.Message}");
+                return new List<Position>();
+            }
+        }
     }
 }
