@@ -16,6 +16,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using QuantConnect.Brokerages.OKX.Converters;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Logging;
@@ -51,12 +52,124 @@ namespace QuantConnect.Brokerages.OKX
                      $"from {request.StartTimeUtc:yyyy-MM-dd HH:mm:ss} to {request.EndTimeUtc:yyyy-MM-dd HH:mm:ss} " +
                      $"at {request.Resolution} resolution");
 
-            // TODO: Implement history fetching logic in Task 3.7
-            // - For TradeBar/QuoteBar: Call GetCandles()
-            // - For Trade Tick: Call GetTrades()
-            // - For Quote Tick: Not supported, return empty
+            // Convert symbol to OKX format
+            var instId = _symbolMapper.GetBrokerageSymbol(request.Symbol);
 
-            yield break;
+            // Handle different data types
+            if (request.DataType == typeof(TradeBar) || request.DataType == typeof(QuoteBar))
+            {
+                // Get candles (OHLCV data)
+                var bar = ConvertResolutionToBar(request.Resolution);
+                var startMs = new DateTimeOffset(request.StartTimeUtc).ToUnixTimeMilliseconds();
+                var endMs = new DateTimeOffset(request.EndTimeUtc).ToUnixTimeMilliseconds();
+
+                // Pagination: OKX returns max 100 candles per request
+                // Use 'before' parameter for historical data pagination
+                // 'before' means: get data older than this timestamp
+                long? before = endMs;
+                var candleCount = 0;
+
+                while (true)
+                {
+                    var candles = _restApiClient.GetCandles(instId, bar, null, before, 100);
+
+                    if (candles == null || candles.Count == 0)
+                    {
+                        Log.Trace($"OKXBrokerage.GetHistory(): No more candles returned. Total fetched: {candleCount}");
+                        break;
+                    }
+
+                    // OKX returns candles in descending order (newest first)
+                    // We need to reverse them for chronological processing
+                    candles.Reverse();
+
+                    foreach (var candle in candles)
+                    {
+                        // Filter: only return candles within requested time range
+                        if (candle.Timestamp < startMs)
+                        {
+                            Log.Trace($"OKXBrokerage.GetHistory(): Reached start of requested range. Total candles: {candleCount}");
+                            yield break;
+                        }
+
+                        if (candle.Timestamp <= endMs)
+                        {
+                            yield return candle.ToTradeBar(request.Symbol);
+                            candleCount++;
+                        }
+                    }
+
+                    // Update pagination marker to the oldest candle timestamp
+                    // (after reversing, the last candle is the oldest)
+                    before = candles[candles.Count - 1].Timestamp;
+
+                    if (candles.Count < 100)
+                    {
+                        Log.Trace($"OKXBrokerage.GetHistory(): Received less than 100 candles. Total: {candleCount}");
+                        break;  // No more data available
+                    }
+                }
+            }
+            else if (request.DataType == typeof(Tick) && request.TickType == TickType.Trade)
+            {
+                // Get recent trade ticks
+                // Note: OKX /api/v5/market/trades endpoint only returns recent trades (max 500)
+                // Historical trade data beyond this is not available via REST API
+                Log.Trace("OKXBrokerage.GetHistory(): Fetching recent trade ticks");
+
+                var trades = _restApiClient.GetTrades(instId, 500);
+
+                if (trades != null && trades.Count > 0)
+                {
+                    // Trades are returned in descending order (newest first)
+                    // Reverse for chronological order
+                    trades.Reverse();
+
+                    foreach (var trade in trades)
+                    {
+                        var time = DateTimeOffset.FromUnixTimeMilliseconds(trade.Timestamp).UtcDateTime;
+
+                        // Filter: only return trades within requested time range
+                        if (time >= request.StartTimeUtc && time <= request.EndTimeUtc)
+                        {
+                            yield return trade.ToTick(_symbolMapper, request.Symbol.SecurityType);
+                        }
+                    }
+                }
+            }
+            else if (request.DataType == typeof(Tick) && request.TickType == TickType.Quote)
+            {
+                // Quote ticks not supported for historical data
+                Log.Trace("OKXBrokerage.GetHistory(): Quote ticks not supported for historical data");
+                yield break;
+            }
+            else
+            {
+                Log.Error($"OKXBrokerage.GetHistory(): Unsupported data type: {request.DataType.Name}");
+                yield break;
+            }
+        }
+
+        /// <summary>
+        /// Converts LEAN Resolution to OKX bar interval format
+        /// </summary>
+        /// <param name="resolution">The LEAN resolution</param>
+        /// <returns>OKX bar interval string (e.g., "1m", "1H", "1D")</returns>
+        private string ConvertResolutionToBar(Resolution resolution)
+        {
+            switch (resolution)
+            {
+                case Resolution.Minute:
+                    return "1m";
+                case Resolution.Hour:
+                    return "1H";
+                case Resolution.Daily:
+                    return "1D";
+                case Resolution.Second:
+                    throw new NotSupportedException("OKXBrokerage.GetHistory(): Second resolution is not supported by OKX API");
+                default:
+                    throw new ArgumentException($"OKXBrokerage.GetHistory(): Unsupported resolution: {resolution}");
+            }
         }
     }
 }

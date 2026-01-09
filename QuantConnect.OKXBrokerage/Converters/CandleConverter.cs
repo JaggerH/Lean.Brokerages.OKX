@@ -17,6 +17,7 @@ using System;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using QuantConnect.Brokerages.OKX.Messages;
+using QuantConnect.Data.Market;
 using QuantConnect.Logging;
 
 namespace QuantConnect.Brokerages.OKX.Converters
@@ -93,6 +94,36 @@ namespace QuantConnect.Brokerages.OKX.Converters
         public override bool CanConvert(Type objectType)
         {
             return objectType == typeof(Candle);
+        }
+    }
+
+    /// <summary>
+    /// Domain converter extensions for Candle
+    /// Converts OKX Candle messages to LEAN TradeBar objects
+    /// </summary>
+    public static class CandleExtensions
+    {
+        /// <summary>
+        /// Converts an OKX Candle to a LEAN TradeBar
+        /// </summary>
+        /// <param name="candle">OKX candle data</param>
+        /// <param name="symbol">LEAN symbol</param>
+        /// <returns>LEAN TradeBar object</returns>
+        public static TradeBar ToTradeBar(this Candle candle, Symbol symbol)
+        {
+            // Convert Unix milliseconds to DateTime
+            var time = DateTimeOffset.FromUnixTimeMilliseconds(candle.Timestamp).UtcDateTime;
+
+            return new TradeBar
+            {
+                Symbol = symbol,
+                Time = time,
+                Open = candle.Open,
+                High = candle.High,
+                Low = candle.Low,
+                Close = candle.Close,
+                Volume = candle.Volume
+            };
         }
     }
 }
