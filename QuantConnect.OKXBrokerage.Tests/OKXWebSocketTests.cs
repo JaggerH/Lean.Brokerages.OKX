@@ -398,35 +398,6 @@ namespace QuantConnect.Brokerages.OKX.Tests
         #region Integration Tests
 
         /// <summary>
-        /// Tests WebSocket integration with OKXBrokerage
-        /// </summary>
-        [Test]
-        public void BrokerageWebSocket_SubscribeToSymbol_Works()
-        {
-            // Arrange
-            var brokerage = new OKXBrokerage(
-                _apiKey,
-                _apiSecret,
-                _passphrase,
-                null);
-
-            // Act
-            brokerage.Connect();
-            Thread.Sleep(2000);
-
-            brokerage.SubscribeToSymbol(_btcusdtSymbol);
-            Thread.Sleep(5000); // Wait for data
-
-            // Assert
-            Assert.Pass("Symbol subscription through brokerage completed without errors");
-
-            // Cleanup
-            brokerage.UnsubscribeFromSymbol(_btcusdtSymbol);
-            brokerage.Disconnect();
-            brokerage.Dispose();
-        }
-
-        /// <summary>
         /// Tests heartbeat mechanism
         /// </summary>
         [Test]

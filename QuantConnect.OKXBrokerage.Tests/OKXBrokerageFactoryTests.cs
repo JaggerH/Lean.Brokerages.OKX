@@ -16,6 +16,7 @@
 using NUnit.Framework;
 using QuantConnect.Configuration;
 using QuantConnect.Data;
+using QuantConnect.Orders.Fees;
 using QuantConnect.Packets;
 using QuantConnect.Securities;
 using System;
