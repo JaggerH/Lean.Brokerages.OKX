@@ -42,6 +42,15 @@ namespace QuantConnect.Brokerages.OKX.RestApi
 
         /// <summary>
         /// Creates a new instance
+        /// Note: Uses OKXEnvironment to determine REST API URL based on okx-environment config
+        /// </summary>
+        public OKXRestApiClient(string apiKey, string apiSecret, string passphrase)
+            : base(apiKey, apiSecret, passphrase, null, OKXEnvironment.GetRestApiUrl())
+        {
+        }
+
+        /// <summary>
+        /// Creates a new instance with explicit REST API URL (for backward compatibility)
         /// </summary>
         public OKXRestApiClient(string apiKey, string apiSecret, string passphrase, string restApiUrl)
             : base(apiKey, apiSecret, passphrase, null, restApiUrl)

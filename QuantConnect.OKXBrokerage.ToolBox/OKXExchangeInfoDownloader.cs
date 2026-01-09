@@ -63,7 +63,7 @@ namespace QuantConnect.OKXBrokerage.ToolBox
         /// </remarks>
         public OKXExchangeInfoDownloader(HashSet<string> symbolFilter)
         {
-            _apiBaseUrl = OKXEnvironment.ProductionApiUrl;
+            _apiBaseUrl = OKXEnvironment.RestApiUrl;
             _tokenizedStockBaseNames = new Dictionary<string, string>();
             _symbolFilter = symbolFilter;
         }

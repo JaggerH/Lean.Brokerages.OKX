@@ -251,6 +251,13 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             request.AddHeader("OK-ACCESS-TIMESTAMP", timestamp);
             request.AddHeader("OK-ACCESS-PASSPHRASE", _passphrase);
             request.AddHeader("Content-Type", "application/json");
+
+            // Add demo trading header if in demo/testnet environment
+            // OKX uses the same REST URL for live and demo, differentiated by this header
+            if (OKXEnvironment.UseSimulatedTradingHeader())
+            {
+                request.AddHeader("x-simulated-trading", "1");
+            }
         }
 
         // ========================================

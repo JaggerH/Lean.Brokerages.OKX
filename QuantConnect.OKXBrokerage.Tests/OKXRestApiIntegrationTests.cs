@@ -38,24 +38,22 @@ namespace QuantConnect.Brokerages.OKX.Tests
             _apiKey = Config.Get("okx-api-key");
             _apiSecret = Config.Get("okx-api-secret");
             _passphrase = Config.Get("okx-passphrase");
-            var environment = Config.Get("okx-environment", "testnet");
-
-            // Set API URL based on environment
-            _restApiUrl = environment == "production"
-                ? "https://www.okx.com"
-                : "https://www.okx.com"; // OKX doesn't have separate testnet URL for REST
 
             // Skip tests if credentials not configured
             if (string.IsNullOrEmpty(_apiKey) || string.IsNullOrEmpty(_apiSecret) || string.IsNullOrEmpty(_passphrase))
             {
                 Assert.Ignore("OKX API credentials not configured in config.json");
             }
+
+            // Get REST API URL from OKXEnvironment (reads okx-environment config)
+            _restApiUrl = OKXEnvironment.GetRestApiUrl();
         }
 
         [SetUp]
         public void SetUp()
         {
-            _client = new OKXRestApiClient(_apiKey, _apiSecret, _passphrase, _restApiUrl);
+            // Use new constructor - OKXEnvironment handles URL and simulated trading header
+            _client = new OKXRestApiClient(_apiKey, _apiSecret, _passphrase);
 
             // Small delay between tests to avoid rate limiting
             Thread.Sleep(500);

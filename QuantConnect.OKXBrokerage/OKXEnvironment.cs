@@ -14,58 +14,92 @@
 */
 
 using QuantConnect.Configuration;
-using QuantConnect.Securities;
 
 namespace QuantConnect.Brokerages.OKX
 {
     /// <summary>
-    /// OKX environment configuration helper
-    /// Manages URLs for production vs testnet environments
+    /// OKX v5 API environment configuration helper
+    /// Manages URLs and settings for live vs demo trading environments
+    /// Official documentation: https://www.okx.com/docs-v5/en/#overview-production-trading-services
     /// </summary>
     public static class OKXEnvironment
     {
-        /// <summary>
-        /// Production REST API URL (complete URL with /api/v4 prefix)
-        /// </summary>
-        public const string ProductionApiUrl = "https://api.okxio.ws/api/v4";
+        // ========================================
+        // REST API URLs
+        // ========================================
 
         /// <summary>
-        /// Production Spot WebSocket URL
+        /// REST API base URL (same for both live and demo trading)
+        /// Live and demo differentiated by x-simulated-trading header
         /// </summary>
-        public const string ProductionWebSocketUrl = "wss://api.okxio.ws/ws/v4/";
+        public const string RestApiUrl = "https://www.okx.com";
+
+        // ========================================
+        // WebSocket URLs - Public Channel
+        // ========================================
 
         /// <summary>
-        /// Production Futures WebSocket URL (USDT settled perpetual contracts)
-        /// Official: wss://fx-ws.okxio.ws/v4/ws/usdt
+        /// Live trading - WebSocket public channel (market data)
+        /// Official: wss://ws.okx.com:8443/ws/v5/public
         /// </summary>
-        public const string ProductionFuturesWebSocketUrl = "wss://fx-ws.okxio.ws/v4/ws/usdt";
+        public const string LiveWebSocketPublicUrl = "wss://ws.okx.com:8443/ws/v5/public";
 
         /// <summary>
-        /// Testnet REST API URL (complete URL with /api/v4 prefix)
+        /// Demo trading - WebSocket public channel (market data)
+        /// Official: wss://wspap.okx.com:8443/ws/v5/public
         /// </summary>
-        public const string TestnetApiUrl = "https://api-testnet.okxapi.io/api/v4";
+        public const string DemoWebSocketPublicUrl = "wss://wspap.okx.com:8443/ws/v5/public";
+
+        // ========================================
+        // WebSocket URLs - Private Channel
+        // ========================================
 
         /// <summary>
-        /// Testnet Spot WebSocket URL (for testing spot trading operations)
-        /// Official: wss://ws-testnet.okx.com/v4/ws/spot
+        /// Live trading - WebSocket private channel (account, orders, positions)
+        /// Official: wss://ws.okx.com:8443/ws/v5/private
         /// </summary>
-        public const string TestnetWebSocketUrl = "wss://ws-testnet.okx.com/v4/ws/spot";
+        public const string LiveWebSocketPrivateUrl = "wss://ws.okx.com:8443/ws/v5/private";
 
         /// <summary>
-        /// Testnet Futures WebSocket URL (USDT settled perpetual contracts)
-        /// Official: wss://ws-testnet.okx.com/v4/ws/futures/usdt
+        /// Demo trading - WebSocket private channel (account, orders, positions)
+        /// Official: wss://wspap.okx.com:8443/ws/v5/private
         /// </summary>
-        public const string TestnetFuturesWebSocketUrl = "wss://ws-testnet.okx.com/v4/ws/futures/usdt";
+        public const string DemoWebSocketPrivateUrl = "wss://wspap.okx.com:8443/ws/v5/private";
+
+        // ========================================
+        // WebSocket URLs - Business Channel
+        // ========================================
 
         /// <summary>
-        /// Sandbox WebSocket URL (for unit tests with MockOKXWebSocketServer)
+        /// Live trading - WebSocket business channel (grid trading, algo orders)
+        /// Official: wss://ws.okx.com:8443/ws/v5/business
+        /// </summary>
+        public const string LiveWebSocketBusinessUrl = "wss://ws.okx.com:8443/ws/v5/business";
+
+        /// <summary>
+        /// Demo trading - WebSocket business channel (grid trading, algo orders)
+        /// Official: wss://wspap.okx.com:8443/ws/v5/business
+        /// </summary>
+        public const string DemoWebSocketBusinessUrl = "wss://wspap.okx.com:8443/ws/v5/business";
+
+        // ========================================
+        // Sandbox (Unit Tests)
+        // ========================================
+
+        /// <summary>
+        /// Sandbox WebSocket URL (for unit tests with mock server)
         /// Default: ws://127.0.0.1:19999
         /// Can be overridden via "okx-websocket-url" config key
         /// </summary>
         public const string SandboxWebSocketUrl = "ws://127.0.0.1:19999";
 
+        // ========================================
+        // Environment Detection
+        // ========================================
+
         /// <summary>
         /// Gets whether we're running in sandbox mode (unit tests with mock server)
+        /// Config: okx-environment = "sandbox"
         /// </summary>
         public static bool IsSandbox
         {
@@ -77,46 +111,101 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Gets whether we're running in testnet mode (official OKX testnet)
+        /// Gets whether we're running in demo/testnet mode (OKX demo trading)
+        /// Config: okx-environment = "testnet" or "demo"
         /// </summary>
-        public static bool IsTestnet
+        public static bool IsDemoTrading
         {
             get
             {
                 var environment = Config.Get("okx-environment", "live").ToLowerInvariant();
-                return environment == "testnet" || environment == "test";
+                return environment == "testnet" || environment == "demo";
             }
         }
 
         /// <summary>
-        /// Gets the appropriate REST API URL based on current environment
+        /// Gets whether we're running in live/production mode (real trading)
+        /// Config: okx-environment = "live" or "production"
+        /// </summary>
+        public static bool IsLiveTrading
+        {
+            get
+            {
+                return !IsSandbox && !IsDemoTrading;
+            }
+        }
+
+        // ========================================
+        // URL Getters
+        // ========================================
+
+        /// <summary>
+        /// Gets the REST API base URL
+        /// Note: OKX v5 uses the same URL for live and demo trading
+        /// Differentiation is done via x-simulated-trading header
         /// </summary>
         public static string GetRestApiUrl()
         {
-            return IsTestnet ? TestnetApiUrl : ProductionApiUrl;
+            return RestApiUrl;
         }
 
         /// <summary>
-        /// Gets the appropriate WebSocket URL based on current environment and security type
-        /// Priority: Sandbox (mock server) > Testnet (official) > Production
+        /// Gets whether to add x-simulated-trading header (demo trading)
         /// </summary>
-        /// <param name="securityType">Security type (Crypto for spot, CryptoFuture for perpetuals)</param>
-        public static string GetWebSocketUrl(string channelName = "spot")
+        public static bool UseSimulatedTradingHeader()
         {
-            // Priority 1: Sandbox mode (unit tests with MockOKXWebSocketServer)
-            // In sandbox, both spot and futures connect to the same mock server
+            return IsDemoTrading;
+        }
+
+        /// <summary>
+        /// Gets the appropriate WebSocket URL for public channel (market data)
+        /// </summary>
+        public static string GetWebSocketPublicUrl()
+        {
+            // Sandbox mode (unit tests)
             if (IsSandbox)
                 return Config.Get("okx-websocket-url", SandboxWebSocketUrl);
 
-            var isFutures = channelName == "futures";
-            // Priority 2: Testnet mode (official OKX testnet)
-            if (IsTestnet)
-            {
-                return isFutures ? TestnetFuturesWebSocketUrl : TestnetWebSocketUrl;
-            }
+            // Demo trading
+            if (IsDemoTrading)
+                return DemoWebSocketPublicUrl;
 
-            // Priority 3: Production mode (live trading)
-            return isFutures ? ProductionFuturesWebSocketUrl : ProductionWebSocketUrl;
+            // Live trading
+            return LiveWebSocketPublicUrl;
+        }
+
+        /// <summary>
+        /// Gets the appropriate WebSocket URL for private channel (account/orders)
+        /// </summary>
+        public static string GetWebSocketPrivateUrl()
+        {
+            // Sandbox mode (unit tests)
+            if (IsSandbox)
+                return Config.Get("okx-websocket-url", SandboxWebSocketUrl);
+
+            // Demo trading
+            if (IsDemoTrading)
+                return DemoWebSocketPrivateUrl;
+
+            // Live trading
+            return LiveWebSocketPrivateUrl;
+        }
+
+        /// <summary>
+        /// Gets the appropriate WebSocket URL for business channel (algo orders)
+        /// </summary>
+        public static string GetWebSocketBusinessUrl()
+        {
+            // Sandbox mode (unit tests)
+            if (IsSandbox)
+                return Config.Get("okx-websocket-url", SandboxWebSocketUrl);
+
+            // Demo trading
+            if (IsDemoTrading)
+                return DemoWebSocketBusinessUrl;
+
+            // Live trading
+            return LiveWebSocketBusinessUrl;
         }
 
         /// <summary>
@@ -125,8 +214,8 @@ namespace QuantConnect.Brokerages.OKX
         public static string GetEnvironmentName()
         {
             if (IsSandbox) return "Sandbox";
-            if (IsTestnet) return "Testnet";
-            return "Production";
+            if (IsDemoTrading) return "Demo";
+            return "Live";
         }
     }
 }

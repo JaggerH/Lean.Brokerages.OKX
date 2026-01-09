@@ -62,8 +62,8 @@ namespace QuantConnect.OKXBrokerage.ToolBox
                 try
                 {
                     // Always use production API for symbol properties updates
-                    Log.Trace($"Program.Main(): Environment: Production (hardcoded)");
-                    Log.Trace($"Program.Main(): API URL: {OKXEnvironment.ProductionApiUrl}");
+                    Log.Trace($"Program.Main(): Environment: {OKXEnvironment.GetEnvironmentName()}");
+                    Log.Trace($"Program.Main(): API URL: {OKXEnvironment.RestApiUrl}");
 
                     var downloader = new OKXExchangeInfoDownloader();
                     var updater = new ExchangeInfoUpdater(downloader);
