@@ -14,54 +14,59 @@
 */
 
 using Newtonsoft.Json;
-using QuantConnect.Brokerages.OKX.Converters;
 
 namespace QuantConnect.Brokerages.OKX.Messages
 {
     /// <summary>
-    /// OKX trade execution record
+    /// Represents OKX v5 API trade data
+    /// https://www.okx.com/docs-v5/en/#rest-api-market-data-get-trades
+    ///
+    /// Response format:
+    /// {
+    ///   "instId": "BTC-USDT",
+    ///   "tradeId": "12345",
+    ///   "px": "41000.5",
+    ///   "sz": "0.01",
+    ///   "side": "buy",
+    ///   "ts": "1597026383085"
+    /// }
     /// </summary>
-    [JsonConverter(typeof(TradeConverter))]
     public class Trade
     {
         /// <summary>
+        /// Instrument ID (e.g., BTC-USDT)
+        /// </summary>
+        [JsonProperty("instId")]
+        public string InstrumentId { get; set; }
+
+        /// <summary>
         /// Trade ID
         /// </summary>
-        [JsonProperty("id")]
-        public long Id { get; set; }
+        [JsonProperty("tradeId")]
+        public string TradeId { get; set; }
 
         /// <summary>
-        /// Currency pair (e.g., BTC_USDT)
+        /// Trade price
         /// </summary>
-        [JsonProperty("currency_pair")]
-        public string CurrencyPair { get; set; }
+        [JsonProperty("px")]
+        public decimal Price { get; set; }
 
         /// <summary>
-        /// Creation time (Unix timestamp in seconds)
+        /// Trade size (quantity)
         /// </summary>
-        [JsonProperty("create_time")]
-        public long CreateTime { get; set; }
+        [JsonProperty("sz")]
+        public decimal Size { get; set; }
 
         /// <summary>
-        /// Creation time in milliseconds
-        /// </summary>
-        [JsonProperty("create_time_ms")]
-        public string CreateTimeMs { get; set; }
-
-        /// <summary>
-        /// Trade side: buy or sell
+        /// Trade side: "buy" or "sell"
         /// </summary>
         [JsonProperty("side")]
         public string Side { get; set; }
 
         /// <summary>
-        /// Trade amount
+        /// Trade timestamp in Unix milliseconds
         /// </summary>
-        public decimal Amount { get; set; }
-
-        /// <summary>
-        /// Trade price
-        /// </summary>
-        public decimal Price { get; set; }
+        [JsonProperty("ts")]
+        public long Timestamp { get; set; }
     }
 }

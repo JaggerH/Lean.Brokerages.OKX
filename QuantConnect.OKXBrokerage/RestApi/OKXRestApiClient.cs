@@ -275,5 +275,92 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 return new List<Position>();
             }
         }
+
+        /// <summary>
+        /// Gets candlestick/K-line data for a specific instrument
+        /// https://www.okx.com/docs-v5/en/#rest-api-market-data-get-candlesticks
+        /// No authentication required
+        /// </summary>
+        /// <param name="instId">Instrument ID (e.g., BTC-USDT, BTC-USDT-SWAP)</param>
+        /// <param name="bar">Bar size (e.g., "1m", "5m", "1H", "1D"). See ConvertResolutionToBar() for supported values</param>
+        /// <param name="after">Pagination: return data after this timestamp (Unix milliseconds). Earlier data if before is not provided</param>
+        /// <param name="before">Pagination: return data before this timestamp (Unix milliseconds). Later data if after is not provided</param>
+        /// <param name="limit">Number of results per request (max 100, default 100)</param>
+        /// <returns>List of candles, or empty list if request fails</returns>
+        public List<Candle> GetCandles(
+            string instId,
+            string bar = "1m",
+            long? after = null,
+            long? before = null,
+            int limit = 100)
+        {
+            try
+            {
+                var queryParams = new List<string>
+                {
+                    $"instId={instId}",
+                    $"bar={bar}",
+                    $"limit={Math.Min(limit, 100)}"  // OKX max limit is 100
+                };
+
+                if (after.HasValue)
+                    queryParams.Add($"after={after.Value}");
+
+                if (before.HasValue)
+                    queryParams.Add($"before={before.Value}");
+
+                var queryString = string.Join("&", queryParams);
+                var response = GetPublic<OKXApiResponse<Candle>>(
+                    "/market/candles",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess)
+                {
+                    Log.Error($"OKXRestApiClient.GetCandles(): Failed to get candles - code: {response?.Code}, msg: {response?.Message}");
+                    return new List<Candle>();
+                }
+
+                return response.Data ?? new List<Candle>();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetCandles(): Exception: {ex.Message}");
+                return new List<Candle>();
+            }
+        }
+
+        /// <summary>
+        /// Gets recent trades for a specific instrument
+        /// https://www.okx.com/docs-v5/en/#rest-api-market-data-get-trades
+        /// No authentication required
+        /// </summary>
+        /// <param name="instId">Instrument ID (e.g., BTC-USDT, BTC-USDT-SWAP)</param>
+        /// <param name="limit">Number of results per request (max 500, default 100)</param>
+        /// <returns>List of trades, or empty list if request fails</returns>
+        public List<Trade> GetTrades(string instId, int limit = 100)
+        {
+            try
+            {
+                var queryString = $"instId={instId}&limit={Math.Min(limit, 500)}";  // OKX max limit is 500
+                var response = GetPublic<OKXApiResponse<Trade>>(
+                    "/market/trades",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess)
+                {
+                    Log.Error($"OKXRestApiClient.GetTrades(): Failed to get trades - code: {response?.Code}, msg: {response?.Message}");
+                    return new List<Trade>();
+                }
+
+                return response.Data ?? new List<Trade>();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetTrades(): Exception: {ex.Message}");
+                return new List<Trade>();
+            }
+        }
     }
 }

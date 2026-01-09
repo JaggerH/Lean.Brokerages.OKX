@@ -19,7 +19,8 @@ using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using static QuantConnect.Brokerages.OKX.OKXUtility;
-using static QuantConnect.Brokerages.OKX.Converters.TradeExtensions;
+// TODO: Uncomment when TradeExtensions is created in Task 3.6
+// using static QuantConnect.Brokerages.OKX.Converters.TradeExtensions;
 using static QuantConnect.Brokerages.OKX.Converters.TickerExtensions;
 using static QuantConnect.Brokerages.OKX.Converters.BookTickerExtensions;
 using OKXTrade = QuantConnect.Brokerages.OKX.Messages.Trade;
@@ -473,6 +474,8 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         protected virtual void HandleTradesMessage(JObject message)
         {
+            // TODO: Implement in Task 3.6 after TradeExtensions.ToTick() is created
+            /*
             try
             {
                 var trades = NormalizeResultToArray<OKXTrade>(message["result"]);
@@ -486,6 +489,7 @@ namespace QuantConnect.Brokerages.OKX
             {
                 Log.Error($"{GetType().Name}.HandleTradesMessage(): Error: {ex.Message}");
             }
+            */
         }
 
         /// <summary>
