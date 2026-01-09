@@ -1,0 +1,50 @@
+{
+  // OKX API Configuration
+  // Get your API credentials from: https://www.okx.com/account/my-api
+
+  // Required: Your OKX API key
+  "okx-api-key": "your-api-key-here",
+
+  // Required: Your OKX API secret
+  "okx-api-secret": "your-api-secret-here",
+
+  // Required: Your OKX API passphrase
+  "okx-passphrase": "your-passphrase-here",
+
+  // Optional: Trading environment (production/demo/testnet)
+  // Default: "production"
+  // Use "demo" or "testnet" for testing with demo funds
+  "okx-environment": "production",
+
+  // Optional: Unified account mode (cash/isolated/cross)
+  // Default: "cash"
+  // - cash: Simple account mode for spot trading
+  // - isolated: Isolated margin mode
+  // - cross: Cross margin mode
+  "okx-unified-account-mode": "cash",
+
+  // Optional: Live holdings
+  // Format: "Symbol,Quantity;Symbol2,Quantity2"
+  // Example: "BTCUSDT,0.5;ETHUSDT,10"
+  "live-holdings": "",
+
+  // LEAN Configuration
+  "environment": "live-paper",
+  "live-mode": true,
+
+  // Data Configuration
+  "data-folder": "../../../Data/",
+  "data-directory": "../../../Data/",
+
+  // Brokerage Configuration
+  "live-mode-brokerage": "OKXBrokerage",
+  "data-queue-handler": "OKXBrokerage",
+
+  // Transaction Handler
+  "transaction-handler": "QuantConnect.Lean.Engine.TransactionHandlers.BacktestingTransactionHandler",
+
+  // Algorithm Configuration
+  "algorithm-type-name": "YourAlgorithmName",
+  "algorithm-language": "CSharp",
+  "algorithm-location": "../../../Algorithm.CSharp/bin/Debug/QuantConnect.Algorithm.CSharp.dll"
+}
