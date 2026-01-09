@@ -52,13 +52,10 @@ namespace QuantConnect.Brokerages.OKX.Tests
         {
             // Create OKXBrokerage instance
             _brokerage = new OKXBrokerage(
-                null,  // orderProvider
-                null,  // securityProvider
-                null,  // aggregator
-                null,  // job
                 _apiKey,
                 _apiSecret,
-                _passphrase
+                _passphrase,
+                null  // algorithm
             );
 
             // Small delay between tests to avoid rate limiting
