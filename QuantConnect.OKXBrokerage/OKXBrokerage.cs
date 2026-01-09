@@ -77,8 +77,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <returns>The open orders</returns>
         public override List<Order> GetOpenOrders()
         {
-            // TODO: Implement in Phase 4
-            return new List<Order>();
+            return _restApiClient.GetOpenOrders();
         }
 
         /// <summary>
@@ -87,8 +86,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <returns>The current holdings from the account</returns>
         public override List<Holding> GetAccountHoldings()
         {
-            // TODO: Implement in Phase 4
-            return new List<Holding>();
+            return _restApiClient.GetAccountHoldings();
         }
 
         /// <summary>
@@ -97,8 +95,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <returns>The current cash balance for each currency available for trading</returns>
         public override List<CashAmount> GetCashBalance()
         {
-            // TODO: Implement in Phase 4
-            return new List<CashAmount>();
+            return _restApiClient.GetCashBalance();
         }
 
         /// <summary>
