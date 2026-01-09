@@ -49,48 +49,39 @@ namespace QuantConnect.Brokerages.OKX.Converters
         {
             var obj = JObject.Load(reader);
 
-            // Parse price strings to decimal
-            var lowestAskStr = obj["lowest_ask"]?.ToString();
-            var highestBidStr = obj["highest_bid"]?.ToString();
+            // OKX v5 API field names:
+            // instId: Instrument ID (e.g., BTC-USDT, BTC-USDT-SWAP)
+            // askPx: Best ask price
+            // bidPx: Best bid price
+            // vol24h: 24h base currency volume
+            // volCcy24h: 24h quote currency volume
+            // high24h: 24h high
+            // low24h: 24h low
 
-            // Support both "currency_pair" (Spot) and "contract" (Futures)
-            var currencyPair = obj["currency_pair"]?.Type == JTokenType.Null ? null : obj["currency_pair"]?.ToString();
-            if (string.IsNullOrEmpty(currencyPair))
-            {
-                currencyPair = obj["contract"]?.Type == JTokenType.Null ? null : obj["contract"]?.ToString();
-            }
-
-            // Smart mapping for volume: Try Spot field first, fallback to Futures field
-            // Spot API returns "quote_volume" (USDT volume)
-            // Futures API returns "volume_24h_settle" (USDT settlement volume)
-            // Both represent the same concept: 24h USDT-denominated volume
-            var quoteVolume = obj["quote_volume"]?.Type == JTokenType.Null ? null : obj["quote_volume"]?.ToString();
-            if (string.IsNullOrEmpty(quoteVolume))
-            {
-                quoteVolume = obj["volume_24h_settle"]?.Type == JTokenType.Null ? null : obj["volume_24h_settle"]?.ToString();
-            }
+            var instId = obj["instId"]?.Type == JTokenType.Null ? null : obj["instId"]?.ToString();
+            var askPxStr = obj["askPx"]?.ToString();
+            var bidPxStr = obj["bidPx"]?.ToString();
 
             // Validate required field
-            if (string.IsNullOrEmpty(currencyPair))
+            if (string.IsNullOrEmpty(instId))
             {
-                // Ticker has no ID field, use "unknown" as identifier
                 var rawJson = obj.ToString(Formatting.None);
                 var truncated = rawJson.Length > 500 ? rawJson.Substring(0, 500) + "..." : rawJson;
-                Log.Error($"TickerConverter: Ticker missing required field 'currency_pair' or 'contract'. Raw: {truncated}");
+                Log.Error($"TickerConverter: Ticker missing required field 'instId'. Raw: {truncated}");
                 return null;
             }
 
             return new Ticker
             {
-                CurrencyPair = currencyPair,
+                CurrencyPair = instId,  // OKX v5 uses instId
                 Last = obj["last"]?.Type == JTokenType.Null ? null : obj["last"]?.ToString(),
-                LowestAsk = string.IsNullOrEmpty(lowestAskStr) ? 0 : decimal.Parse(lowestAskStr),
-                HighestBid = string.IsNullOrEmpty(highestBidStr) ? 0 : decimal.Parse(highestBidStr),
-                ChangePercentage = obj["change_percentage"]?.Type == JTokenType.Null ? null : obj["change_percentage"]?.ToString(),
-                BaseVolume = obj["base_volume"]?.Type == JTokenType.Null ? null : obj["base_volume"]?.ToString(),
-                QuoteVolume = quoteVolume,  // Unified field for both Spot and Futures
-                High24h = obj["high_24h"]?.Type == JTokenType.Null ? null : obj["high_24h"]?.ToString(),
-                Low24h = obj["low_24h"]?.Type == JTokenType.Null ? null : obj["low_24h"]?.ToString()
+                LowestAsk = string.IsNullOrEmpty(askPxStr) ? 0 : decimal.Parse(askPxStr),
+                HighestBid = string.IsNullOrEmpty(bidPxStr) ? 0 : decimal.Parse(bidPxStr),
+                ChangePercentage = obj["changePercentage"]?.Type == JTokenType.Null ? null : obj["changePercentage"]?.ToString(),
+                BaseVolume = obj["vol24h"]?.Type == JTokenType.Null ? null : obj["vol24h"]?.ToString(),
+                QuoteVolume = obj["volCcy24h"]?.Type == JTokenType.Null ? null : obj["volCcy24h"]?.ToString(),
+                High24h = obj["high24h"]?.Type == JTokenType.Null ? null : obj["high24h"]?.ToString(),
+                Low24h = obj["low24h"]?.Type == JTokenType.Null ? null : obj["low24h"]?.ToString()
             };
         }
 

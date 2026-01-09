@@ -157,9 +157,10 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             var serverTimeMs = serverTimeSec.Value;
 
             // Calculate offset: serverTime - clientTime
-            // Subtract additional 2 seconds to avoid "timestamp too first" errors on testnet
+            // OKX API has 30-second tolerance, so we don't need additional safety margin
+            // (unlike Gate.io which has stricter ~5-second tolerance)
             var rawOffset = serverTimeMs - clientTimeMs;
-            _timeOffsetMs = rawOffset - 2000;
+            _timeOffsetMs = rawOffset;
         }
 
         // ========================================
@@ -187,15 +188,19 @@ namespace QuantConnect.Brokerages.OKX.RestApi
 
         /// <summary>
         /// Generates a timestamp for API requests
-        /// OKX v5 API uses Unix milliseconds timestamp as ISO 8601 string
-        /// Example: "1597026383085"
+        /// OKX v5 API requires ISO 8601 format with millisecond precision
+        /// Example: "2020-12-08T09:08:57.715Z"
+        /// https://www.okx.com/docs-v5/en/#rest-api-authentication
         /// </summary>
         protected string GetNonce()
         {
             // Get current time with dynamic offset applied
             // No locking needed - _timeOffsetMs is set once during initialization
             var now = DateTimeOffset.UtcNow.AddMilliseconds(_timeOffsetMs);
-            return now.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
+
+            // OKX API v5 requires ISO 8601 format: "2020-12-08T09:08:57.715Z"
+            // Format: yyyy-MM-ddTHH:mm:ss.fffZ (millisecond precision, UTC timezone)
+            return now.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
         }
 
         /// <summary>

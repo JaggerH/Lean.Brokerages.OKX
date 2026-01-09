@@ -127,11 +127,14 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
             // Verify instrument properties
             Assert.AreEqual("SWAP", btcUsdtSwap.InstrumentType);
-            Assert.AreEqual("BTC", btcUsdtSwap.BaseCurrency);
+            // Note: OKX SWAP instruments have empty baseCcy/quoteCcy fields
+            // Use ctValCcy (contract value currency) instead
+            Assert.AreEqual("BTC", btcUsdtSwap.ContractValueCurrency, "Contract value currency should be BTC");
+            Assert.AreEqual("USDT", btcUsdtSwap.SettlementCurrency, "Settlement currency should be USDT");
             Assert.IsNotEmpty(btcUsdtSwap.ContractValue, "ContractValue should not be empty");
 
             Console.WriteLine($"Found {instruments.Count} SWAP instruments");
-            Console.WriteLine($"BTC-USDT-SWAP: ContractValue={btcUsdtSwap.ContractValue}, State={btcUsdtSwap.State}");
+            Console.WriteLine($"BTC-USDT-SWAP: CtValCcy={btcUsdtSwap.ContractValueCurrency}, SettleCcy={btcUsdtSwap.SettlementCurrency}, CtVal={btcUsdtSwap.ContractValue}, State={btcUsdtSwap.State}");
         }
 
         /// <summary>
