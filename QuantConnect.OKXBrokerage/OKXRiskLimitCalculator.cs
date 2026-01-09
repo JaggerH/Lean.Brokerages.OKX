@@ -100,7 +100,7 @@ namespace QuantConnect.Brokerages.OKX
             // Get current positions from REST API
             var positions = _restClient.GetPositions();
             var position = positions.FirstOrDefault(p =>
-                p.Contract.Equals(contract, StringComparison.OrdinalIgnoreCase));
+                p.InstrumentId.Equals(contract, StringComparison.OrdinalIgnoreCase));
 
             // Get open order tickets from Algorithm (more accurate than REST API)
             var openOrderTickets = _algorithm.Transactions
@@ -134,7 +134,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <param name="contract">Contract name for logging</param>
         /// <returns>Effective position value in USD</returns>
         private decimal CalculateEffectivePositionValue(
-            FuturesPosition position,
+            OKXPosition position,
             List<OrderTicket> openOrderTickets,
             string contract)
         {
@@ -142,24 +142,32 @@ namespace QuantConnect.Brokerages.OKX
             decimal positionValue = 0m;
             decimal markPrice = 0m;
 
-            if (position != null && position.Size != 0)
+            if (position != null &&
+                !string.IsNullOrEmpty(position.Position) &&
+                decimal.TryParse(position.Position, NumberStyles.Any, CultureInfo.InvariantCulture, out var posSize) &&
+                posSize != 0)
             {
-                // Use the Value field from position (already calculated by OKX)
-                if (!string.IsNullOrEmpty(position.Value) &&
-                    decimal.TryParse(position.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var pv))
-                {
-                    positionValue = Math.Abs(pv);
-                }
+                // Calculate position value from size and price
+                // OKX v5 API doesn't provide pre-calculated value, need to compute it
+                // positionValue = abs(quantity) * markPrice
 
-                // Get mark price for pending order value calculation
-                if (!string.IsNullOrEmpty(position.MarkPrice) &&
-                    decimal.TryParse(position.MarkPrice, NumberStyles.Any, CultureInfo.InvariantCulture, out var mp))
+                // Get mark price for position value calculation
+                if (!string.IsNullOrEmpty(position.LastPrice) &&
+                    decimal.TryParse(position.LastPrice, NumberStyles.Any, CultureInfo.InvariantCulture, out var mp))
                 {
                     markPrice = mp;
+                    positionValue = Math.Abs(posSize * markPrice);
+                }
+                else if (!string.IsNullOrEmpty(position.AveragePrice) &&
+                    decimal.TryParse(position.AveragePrice, NumberStyles.Any, CultureInfo.InvariantCulture, out var avgPx))
+                {
+                    // Fallback to average price if mark price not available
+                    markPrice = avgPx;
+                    positionValue = Math.Abs(posSize * avgPx);
                 }
 
                 Log.Trace($"OKXRiskLimitCalculator: {contract} Position: " +
-                         $"Size={position.Size}, Value={positionValue:N2}, MarkPrice={markPrice:N2}");
+                         $"Size={posSize}, Value={positionValue:N2}, MarkPrice={markPrice:N2}");
             }
 
             // Calculate pending order value using OrderTicket.QuantityRemaining

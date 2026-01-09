@@ -15,7 +15,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using QuantConnect.Brokerages.OKX.Converters;
 using QuantConnect.Brokerages.OKX.Messages;
 using QuantConnect.Brokerages.OKX.RestApi;
 using QuantConnect.Data.Market;
@@ -62,8 +64,35 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// </summary>
         public override List<CashAmount> GetCashBalance()
         {
-            // TODO: Implement GetCashBalance for OKX
-            return new List<CashAmount>();
+            try
+            {
+                var balanceData = GetAccountBalance();
+                if (balanceData == null || balanceData.Details == null || balanceData.Details.Count == 0)
+                {
+                    Log.Error("OKXRestApiClient.GetCashBalance(): Failed to get account balance");
+                    return new List<CashAmount>();
+                }
+
+                var result = new List<CashAmount>();
+                foreach (var detail in balanceData.Details)
+                {
+                    if (string.IsNullOrEmpty(detail.AvailableBalance))
+                        continue;
+
+                    if (decimal.TryParse(detail.AvailableBalance, NumberStyles.Any, CultureInfo.InvariantCulture, out var availBalance) &&
+                        availBalance > 0)
+                    {
+                        result.Add(new CashAmount(availBalance, detail.Currency));
+                    }
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetCashBalance(): Exception: {ex.Message}");
+                return new List<CashAmount>();
+            }
         }
 
         /// <summary>
@@ -71,8 +100,31 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// </summary>
         public override List<Holding> GetAccountHoldings()
         {
-            // TODO: Implement GetAccountHoldings for OKX
-            return new List<Holding>();
+            try
+            {
+                var positions = GetPositions();
+                if (positions == null || positions.Count == 0)
+                {
+                    return new List<Holding>();
+                }
+
+                var result = new List<Holding>();
+                foreach (var position in positions)
+                {
+                    var holding = position.ToHolding(_symbolMapper);
+                    if (holding != null)
+                    {
+                        result.Add(holding);
+                    }
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetAccountHoldings(): Exception: {ex.Message}");
+                return new List<Holding>();
+            }
         }
 
         /// <summary>
@@ -80,8 +132,31 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// </summary>
         public override List<QuantConnect.Orders.Order> GetOpenOrders()
         {
-            // TODO: Implement GetOpenOrders for OKX
-            return new List<QuantConnect.Orders.Order>();
+            try
+            {
+                var pendingOrders = GetPendingOrders();
+                if (pendingOrders == null || pendingOrders.Count == 0)
+                {
+                    return new List<QuantConnect.Orders.Order>();
+                }
+
+                var result = new List<QuantConnect.Orders.Order>();
+                foreach (var okxOrder in pendingOrders)
+                {
+                    var order = okxOrder.ToLeanOrder(_symbolMapper);
+                    if (order != null)
+                    {
+                        result.Add(order);
+                    }
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetOpenOrders(): Exception: {ex.Message}");
+                return new List<QuantConnect.Orders.Order>();
+            }
         }
 
         /// <summary>
@@ -94,12 +169,45 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         }
 
         /// <summary>
-        /// Gets positions (placeholder for OKX implementation)
+        /// Gets positions for the current account
+        /// https://www.okx.com/docs-v5/en/#rest-api-account-get-positions
+        /// Requires authentication
         /// </summary>
-        public List<FuturesPosition> GetPositions()
+        /// <param name="instType">Instrument type: MARGIN, SWAP, FUTURES, OPTION (optional)</param>
+        /// <param name="instId">Instrument ID (optional, e.g., BTC-USDT-SWAP)</param>
+        /// <returns>List of positions, or empty list if request fails</returns>
+        public List<OKXPosition> GetPositions(string instType = null, string instId = null)
         {
-            // TODO: Implement GetPositions for OKX
-            return new List<FuturesPosition>();
+            try
+            {
+                var queryParams = new List<string>();
+
+                if (!string.IsNullOrEmpty(instType))
+                    queryParams.Add($"instType={instType}");
+
+                if (!string.IsNullOrEmpty(instId))
+                    queryParams.Add($"instId={instId}");
+
+                var queryString = queryParams.Count > 0 ? string.Join("&", queryParams) : "";
+
+                var response = Get<OKXApiResponse<OKXPosition>>(
+                    "/account/positions",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess)
+                {
+                    Log.Error($"OKXRestApiClient.GetPositions(): Failed to get positions - code: {response?.Code}, msg: {response?.Message}");
+                    return new List<OKXPosition>();
+                }
+
+                return response.Data ?? new List<OKXPosition>();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetPositions(): Exception: {ex.Message}");
+                return new List<OKXPosition>();
+            }
         }
 
         /// <summary>
@@ -206,77 +314,6 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         }
 
         /// <summary>
-        /// Gets account balance
-        /// https://www.okx.com/docs-v5/en/#rest-api-account-get-balance
-        /// Requires authentication
-        /// </summary>
-        /// <param name="currency">Currency to query (optional, empty for all)</param>
-        /// <returns>Account balance, or null if request fails</returns>
-        public AccountBalance GetAccountBalance(string currency = "")
-        {
-            try
-            {
-                var queryString = string.IsNullOrEmpty(currency) ? "" : $"ccy={currency}";
-                var response = Get<OKXApiResponse<AccountBalance>>(
-                    "/account/balance",
-                    queryString,
-                    defaultValue: null);
-
-                if (response == null || !response.IsSuccess || response.Data == null || response.Data.Count == 0)
-                {
-                    Log.Error($"OKXRestApiClient.GetAccountBalance(): Failed to get balance - code: {response?.Code}, msg: {response?.Message}");
-                    return null;
-                }
-
-                return response.Data[0];
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"OKXRestApiClient.GetAccountBalance(): Exception: {ex.Message}");
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// Gets account positions
-        /// https://www.okx.com/docs-v5/en/#rest-api-account-get-positions
-        /// Requires authentication
-        /// </summary>
-        /// <param name="instType">Instrument type (optional): MARGIN, SWAP, FUTURES, OPTION</param>
-        /// <param name="instId">Instrument ID (optional)</param>
-        /// <returns>List of positions, or empty list if request fails</returns>
-        public List<Position> GetAccountPositions(string instType = "", string instId = "")
-        {
-            try
-            {
-                var queryParams = new List<string>();
-                if (!string.IsNullOrEmpty(instType))
-                    queryParams.Add($"instType={instType}");
-                if (!string.IsNullOrEmpty(instId))
-                    queryParams.Add($"instId={instId}");
-
-                var queryString = string.Join("&", queryParams);
-                var response = Get<OKXApiResponse<Position>>(
-                    "/account/positions",
-                    queryString,
-                    defaultValue: null);
-
-                if (response == null || !response.IsSuccess)
-                {
-                    Log.Error($"OKXRestApiClient.GetAccountPositions(): Failed to get positions - code: {response?.Code}, msg: {response?.Message}");
-                    return new List<Position>();
-                }
-
-                return response.Data ?? new List<Position>();
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"OKXRestApiClient.GetAccountPositions(): Exception: {ex.Message}");
-                return new List<Position>();
-            }
-        }
-
-        /// <summary>
         /// Gets candlestick/K-line data for a specific instrument
         /// https://www.okx.com/docs-v5/en/#rest-api-market-data-get-candlesticks
         /// No authentication required
@@ -360,6 +397,81 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             {
                 Log.Error($"OKXRestApiClient.GetTrades(): Exception: {ex.Message}");
                 return new List<Trade>();
+            }
+        }
+
+        /// <summary>
+        /// Gets pending orders (unfilled or partially filled) under the current account
+        /// https://www.okx.com/docs-v5/en/#rest-api-trade-get-order-list
+        /// Requires authentication
+        /// </summary>
+        /// <param name="instType">Instrument type: SPOT, MARGIN, SWAP, FUTURES, OPTION (optional)</param>
+        /// <param name="instId">Instrument ID (optional, e.g., BTC-USDT)</param>
+        /// <returns>List of pending orders, or empty list if request fails</returns>
+        public List<OKXOrder> GetPendingOrders(string instType = null, string instId = null)
+        {
+            try
+            {
+                var queryParams = new List<string>();
+
+                if (!string.IsNullOrEmpty(instType))
+                    queryParams.Add($"instType={instType}");
+
+                if (!string.IsNullOrEmpty(instId))
+                    queryParams.Add($"instId={instId}");
+
+                var queryString = queryParams.Count > 0 ? string.Join("&", queryParams) : "";
+
+                var response = Get<OKXApiResponse<OKXOrder>>(
+                    "/trade/orders-pending",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess)
+                {
+                    Log.Error($"OKXRestApiClient.GetPendingOrders(): Failed to get pending orders - code: {response?.Code}, msg: {response?.Message}");
+                    return new List<OKXOrder>();
+                }
+
+                return response.Data ?? new List<OKXOrder>();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetPendingOrders(): Exception: {ex.Message}");
+                return new List<OKXOrder>();
+            }
+        }
+
+        /// <summary>
+        /// Gets account balance information
+        /// https://www.okx.com/docs-v5/en/#rest-api-account-get-balance
+        /// Requires authentication
+        /// </summary>
+        /// <param name="ccy">Currency (optional, e.g., USDT, BTC). If null, returns all currencies</param>
+        /// <returns>Account balance data, or null if request fails</returns>
+        public OKXAccountBalance GetAccountBalance(string ccy = null)
+        {
+            try
+            {
+                var queryString = !string.IsNullOrEmpty(ccy) ? $"ccy={ccy}" : "";
+
+                var response = Get<OKXApiResponse<OKXAccountBalance>>(
+                    "/account/balance",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess || response.Data == null || response.Data.Count == 0)
+                {
+                    Log.Error($"OKXRestApiClient.GetAccountBalance(): Failed to get balance - code: {response?.Code}, msg: {response?.Message}");
+                    return null;
+                }
+
+                return response.Data[0];
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetAccountBalance(): Exception: {ex.Message}");
+                return null;
             }
         }
     }
