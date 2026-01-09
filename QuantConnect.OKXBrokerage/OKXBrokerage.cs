@@ -60,6 +60,9 @@ namespace QuantConnect.Brokerages.OKX
             _symbolMapper = new OKXSymbolMapper(Market.OKX);
             _restApiClient = new OKXRestApiClient(apiKey, apiSecret, passphrase);
 
+            // Initialize WebSocket connections
+            InitializeWebSockets();
+
             Log.Trace($"OKXBrokerage(): Initialized for {OKXEnvironment.GetEnvironmentName()} environment");
         }
 
@@ -337,6 +340,9 @@ namespace QuantConnect.Brokerages.OKX
         {
             // Connection is established through REST API client initialization
             Log.Trace("OKXBrokerage.Connect(): Connected to OKX REST API");
+
+            // Subscribe to private channels for real-time order/account updates
+            SubscribeToPrivateChannels();
         }
 
         /// <summary>
@@ -344,7 +350,11 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         public override void Disconnect()
         {
-            Log.Trace("OKXBrokerage.Disconnect(): Disconnected from OKX REST API");
+            // Disconnect WebSocket connections
+            _publicWebSocket?.Disconnect();
+            _privateWebSocket?.Disconnect();
+
+            Log.Trace("OKXBrokerage.Disconnect(): Disconnected from OKX REST API and WebSockets");
         }
 
         /// <summary>
@@ -352,6 +362,9 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         public override void Dispose()
         {
+            // Dispose WebSocket connections
+            DisposeWebSockets();
+
             Log.Trace("OKXBrokerage.Dispose(): Disposing OKXBrokerage");
         }
     }

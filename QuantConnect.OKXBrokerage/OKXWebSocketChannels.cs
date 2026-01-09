@@ -18,16 +18,16 @@ using System.Collections.Concurrent;
 namespace QuantConnect.Brokerages.OKX
 {
     /// <summary>
-    /// Tracks channel subscriptions for a OKX WebSocket connection
+    /// Tracks channel subscriptions for a OKX v5 WebSocket connection
     /// Maps channel keys to LEAN Symbol objects for message routing
     /// Thread-safe dictionary for concurrent access from WebSocket threads
     /// </summary>
     /// <remarks>
-    /// Channel key format: "{channel}:{currency_pair}"
-    /// Example: "spot.trades:BTC_USDT" or "futures.order_book_update:BTC_USDT"
+    /// Channel key format: "{channel}:{instId}"
+    /// Example: "tickers:BTC-USDT" or "books5:BTC-USDT-SWAP"
     ///
     /// This allows us to route incoming WebSocket messages to the correct Symbol
-    /// since OKX sends messages with channel name and currency_pair, but LEAN
+    /// since OKX sends messages with channel name and instId, but LEAN
     /// needs Symbol objects for data processing
     /// </remarks>
     public class OKXWebSocketChannels : ConcurrentDictionary<string, Symbol>
@@ -35,47 +35,47 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Creates a channel key for subscription tracking
         /// </summary>
-        /// <param name="channel">OKX channel name (e.g., "spot.trades", "futures.order_book_update")</param>
-        /// <param name="currencyPair">OKX currency pair (e.g., "BTC_USDT")</param>
+        /// <param name="channel">OKX v5 channel name (e.g., "tickers", "trades", "books5", "orders")</param>
+        /// <param name="instId">OKX instrument ID (e.g., "BTC-USDT", "BTC-USDT-SWAP")</param>
         /// <returns>Channel key for dictionary lookup</returns>
-        public static string CreateChannelKey(string channel, string currencyPair)
+        public static string CreateChannelKey(string channel, string instId)
         {
-            return $"{channel}:{currencyPair}";
+            return $"{channel}:{instId}";
         }
 
         /// <summary>
         /// Adds a symbol subscription to this WebSocket
         /// </summary>
-        /// <param name="channel">OKX channel name</param>
-        /// <param name="currencyPair">OKX currency pair</param>
+        /// <param name="channel">OKX v5 channel name</param>
+        /// <param name="instId">OKX instrument ID</param>
         /// <param name="symbol">LEAN Symbol to route messages to</param>
-        public void AddSubscription(string channel, string currencyPair, Symbol symbol)
+        public void AddSubscription(string channel, string instId, Symbol symbol)
         {
-            var key = CreateChannelKey(channel, currencyPair);
+            var key = CreateChannelKey(channel, instId);
             this[key] = symbol;
         }
 
         /// <summary>
         /// Removes a symbol subscription from this WebSocket
         /// </summary>
-        /// <param name="channel">OKX channel name</param>
-        /// <param name="currencyPair">OKX currency pair</param>
-        public void RemoveSubscription(string channel, string currencyPair)
+        /// <param name="channel">OKX v5 channel name</param>
+        /// <param name="instId">OKX instrument ID</param>
+        public void RemoveSubscription(string channel, string instId)
         {
-            var key = CreateChannelKey(channel, currencyPair);
+            var key = CreateChannelKey(channel, instId);
             TryRemove(key, out _);
         }
 
         /// <summary>
         /// Gets the LEAN Symbol for a channel subscription
         /// </summary>
-        /// <param name="channel">OKX channel name</param>
-        /// <param name="currencyPair">OKX currency pair</param>
+        /// <param name="channel">OKX v5 channel name</param>
+        /// <param name="instId">OKX instrument ID</param>
         /// <param name="symbol">Output LEAN Symbol if found</param>
         /// <returns>True if subscription exists, false otherwise</returns>
-        public bool TryGetSymbol(string channel, string currencyPair, out Symbol symbol)
+        public bool TryGetSymbol(string channel, string instId, out Symbol symbol)
         {
-            var key = CreateChannelKey(channel, currencyPair);
+            var key = CreateChannelKey(channel, instId);
             return TryGetValue(key, out symbol);
         }
     }
