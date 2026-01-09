@@ -14,23 +14,22 @@
 */
 
 using System;
+using System.Collections.Generic;
+using System.Globalization;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using QuantConnect.Brokerages.OKX.Messages;
+using QuantConnect.Data.Market;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
-using static QuantConnect.Brokerages.OKX.OKXUtility;
-using static QuantConnect.Brokerages.OKX.Converters.TradeExtensions;
-using static QuantConnect.Brokerages.OKX.Converters.TickerExtensions;
-using static QuantConnect.Brokerages.OKX.Converters.BookTickerExtensions;
-using OKXTrade = QuantConnect.Brokerages.OKX.Messages.Trade;
-using OKXTicker = QuantConnect.Brokerages.OKX.Messages.Ticker;
-using OKXBookTicker = QuantConnect.Brokerages.OKX.Messages.BookTicker;
+using QuantConnect.Securities;
 
 namespace QuantConnect.Brokerages.OKX
 {
     /// <summary>
-    /// OKX Brokerage - WebSocket Message Handling
-    /// Provides message routing and processing framework
+    /// OKX Brokerage - WebSocket Message Handling (OKX v5 API)
+    /// Implements message routing and processing for OKX v5 WebSocket API
     /// </summary>
     public abstract partial class OKXBaseBrokerage
     {
@@ -54,13 +53,20 @@ namespace QuantConnect.Brokerages.OKX
 
                 var rawMessage = textMessage.Message;
 
-                // Skip empty messages
+                // Skip empty or whitespace messages
                 if (string.IsNullOrWhiteSpace(rawMessage) || rawMessage.Length < 2)
                 {
                     return;
                 }
 
-                // Process message
+                // Handle plain text messages (ping/pong)
+                if (rawMessage == "pong" || rawMessage == "ping")
+                {
+                    _lastMessageTime = DateTime.UtcNow;
+                    return;
+                }
+
+                // Process JSON message
                 ProcessMessage(rawMessage);
             }
             catch (Exception ex)
@@ -70,7 +76,7 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Processes a WebSocket message
+        /// Processes a WebSocket message (OKX v5 API format)
         /// </summary>
         /// <param name="rawMessage">Raw JSON message</param>
         protected virtual void ProcessMessage(string rawMessage)
@@ -80,62 +86,28 @@ namespace QuantConnect.Brokerages.OKX
                 // Update last message time
                 _lastMessageTime = DateTime.UtcNow;
 
-                var message = JObject.Parse(rawMessage);
+                var jObject = JObject.Parse(rawMessage);
 
-                // OKX uses two message formats:
-                // 1. API responses: fields in "header" object
-                // 2. Stream messages: fields at root level
-                var header = message["header"];
-                var channel = header?["channel"]?.ToString() ?? message["channel"]?.ToString();
-                var eventType = header?["event"]?.ToString() ?? message["event"]?.ToString();
+                // OKX v5 API uses two message formats:
+                // 1. Event messages (subscribe, login, error): { "event": "...", "code": "...", "msg": "..." }
+                // 2. Data push messages: { "arg": { "channel": "..." }, "data": [...] }
 
-                if (string.IsNullOrEmpty(channel))
+                // Check for event messages
+                if (jObject["event"] != null)
                 {
-                    Log.Trace($"{GetType().Name}.ProcessMessage(): Message without channel: {rawMessage.Substring(0, Math.Min(200, rawMessage.Length))}");
+                    HandleEventMessage(jObject);
                     return;
                 }
 
-                // ========================================
-                // SYSTEM MESSAGES (no event type filtering needed)
-                // ========================================
-
-                // Handle pong responses (spot.pong, futures.pong)
-                // Pong messages have event: "" (empty string), so handle before event type checks
-                if (channel.EndsWith(".pong"))
+                // Check for data push messages
+                if (jObject["arg"] != null && jObject["data"] != null)
                 {
-                    HandlePongMessage();
+                    HandleDataMessage(jObject);
                     return;
                 }
 
-                // ========================================
-                // PHASE 1: 按 eventType 分类处理
-                // ========================================
-
-                // Handle error messages
-                if (eventType == "error")
-                {
-                    HandleErrorMessage(message, rawMessage);
-                    return;
-                }
-
-                // Handle subscription/unsubscription confirmation
-                if (eventType == "subscribe" || eventType == "unsubscribe")
-                {
-                    HandleSubscriptionResponse(message, channel, eventType);
-                    return;
-                }
-
-                // Handle data updates - route to channel-specific handlers
-                // Handle API responses (login, order operations, etc.)
-
-                if (eventType == "update" || eventType == "api")
-                {
-                    RouteMessage(channel, eventType, message);
-                    return;
-                }
-
-                // Unknown event type
-                Log.Trace($"{GetType().Name}.ProcessMessage(): Unknown event type '{eventType}' on channel '{channel}'");
+                // Unknown message format
+                Log.Trace($"{GetType().Name}.ProcessMessage(): Unknown message format: {rawMessage.Substring(0, Math.Min(200, rawMessage.Length))}");
             }
             catch (Exception ex)
             {
@@ -143,880 +115,580 @@ namespace QuantConnect.Brokerages.OKX
             }
         }
 
-        /// <summary>
-        /// Handles error event messages
-        /// </summary>
-        protected virtual void HandleErrorMessage(JObject message, string rawMessage)
-        {
-            var error = message["error"];
-            var code = error?["code"]?.ToString();
-            var msg = error?["message"]?.ToString();
-            Log.Error($"{GetType().Name}.HandleErrorMessage(): Error from OKX - Code: {code}, Message: {msg}");
-            Log.Error($"  Full message: {rawMessage}");
-
-            // Notify the engine about the error
-            // Use Warning (not Error) to avoid stopping the algorithm
-            // WebSocket errors are often temporary and the connection will auto-reconnect
-            OnMessage(new BrokerageMessageEvent(
-                BrokerageMessageType.Warning,
-                code ?? "-1",
-                $"OKX WebSocket error: {msg ?? "Unknown error"}"
-            ));
-        }
-
-        /// <summary>
-        /// Handles subscription and unsubscription response messages
-        /// </summary>
-        protected virtual void HandleSubscriptionResponse(JObject message, string channel, string eventType)
-        {
-            var result = message["result"];
-            var status = result?["status"]?.ToString();
-
-            if (status == "success")
-            {
-                Log.Trace($"{GetType().Name}.HandleSubscriptionResponse(): {eventType} '{channel}' successful");
-            }
-            else
-            {
-                // Check for error information
-                var error = message["error"];
-                if (error != null && error.HasValues)
-                {
-                    var errorCode = error["code"]?.ToObject<int>() ?? 0;
-                    var errorMessage = error["message"]?.ToString() ?? "Unknown error";
-                    Log.Error($"{GetType().Name}.HandleSubscriptionResponse(): {eventType} failed on channel '{channel}' - Code: {errorCode}, Message: {errorMessage}");
-
-                    // Only trigger reconnection for private channel failures (orders, usertrades, balances)
-                    // Public channel failures (trades, tickers) are logged but don't trigger reconnection
-                    if (IsPrivateChannel(channel))
-                    {
-                        TriggerReconnect("SubscriptionFailed", $"Subscription {eventType} failed on channel '{channel}': {errorMessage}");
-                    }
-                }
-                else
-                {
-                    Log.Error($"{GetType().Name}.HandleSubscriptionResponse(): {eventType} failed on channel '{channel}' - Status: {status}");
-
-                    // Only trigger reconnection for private channel failures
-                    if (IsPrivateChannel(channel))
-                    {
-                        TriggerReconnect("SubscriptionFailed", $"Subscription {eventType} failed on channel '{channel}' - Status: {status ?? "unknown"}");
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// Determines if a channel is a private channel (requires authentication)
-        /// Private channels: orders, usertrades, balances
-        /// Public channels: trades, tickers, book_ticker, order_book
-        /// </summary>
-        private static bool IsPrivateChannel(string channel)
-        {
-            return channel.EndsWith(".orders") ||
-                   channel.EndsWith(".usertrades") ||
-                   channel.EndsWith(".balances");
-        }
-
-        /// <summary>
-        /// Routes message to appropriate handler based on channel
-        /// </summary>
-        /// <param name="channel">Channel name</param>
-        /// <param name="eventType">Event type</param>
-        /// <param name="message">Parsed JSON message</param>
-        /// <remarks>
-        /// Performance optimization: Public market data channels (trades, tickers, order_book)
-        /// are processed asynchronously via Task.Run() to avoid blocking the WebSocket IO thread.
-        /// This allows the IO thread to continue receiving messages while business logic executes
-        /// in parallel on ThreadPool worker threads.
-        ///
-        /// Private channels (orders, balances) remain synchronous because they access shared state
-        /// (_ordersByBrokerId, _fills) and must execute sequentially to maintain order consistency.
-        ///
-        /// Performance impact (8-core CPU):
-        /// - IO thread latency: 580μs → 130μs (4.5x improvement)
-        /// - Overall throughput: ~3x improvement due to parallel processing
-        /// - Memory overhead: ~50μs Task creation cost per message (negligible)
-        /// </remarks>
-        protected virtual void RouteMessage(string channel, string eventType, JObject message)
-        {
-            // ========================================
-            // FAST PATH: System messages (synchronous)
-            // These must execute quickly (<1μs) on the IO thread
-            // ========================================
-
-            // Handle login/authentication (critical path)
-            if (channel.EndsWith(".login"))
-            {
-                HandleLoginMessage(message, eventType);
-                return;
-            }
-
-            // ========================================
-            // SLOW PATH: Private channels (synchronous)
-            // These handlers access shared state (_ordersByBrokerId, _fills)
-            // Executed sequentially on the WebSocket IO thread (no concurrent access)
-            // ========================================
-
-            if (channel.EndsWith(".orders"))
-            {
-                HandleOrdersMessage(message);
-                return;
-            }
-
-            if (channel.EndsWith(".usertrades"))
-            {
-                HandleUserTradesMessage(message);
-                return;
-            }
-
-            if (channel.EndsWith(".balances"))
-            {
-                HandleBalancesMessage(message);
-                return;
-            }
-
-            // ========================================
-            // FAST PATH WITHOUT LOCKING: Public channels (asynchronous)
-            // These handlers are completely independent per symbol
-            // Only call thread-safe _aggregator.Update()
-            // Can safely execute in parallel across multiple CPU cores
-            // ========================================
-
-            // IMPORTANT: Check .trades AFTER .usertrades to avoid false match
-            // (.usertrades would match .trades due to EndsWith)
-            if (channel.EndsWith(".trades") && !channel.EndsWith(".usertrades"))
-            {
-                // 🚀 Async processing: Submit to ThreadPool, return immediately
-                // Each message typically contains 1-10 trades for different symbols
-                System.Threading.Tasks.Task.Run(() =>
-                {
-                    try
-                    {
-                        HandleTradesMessage(message);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"{GetType().Name}.RouteMessage(): Error in async trades handler: {ex}");
-                    }
-                });
-                return;
-            }
-
-            if (channel.EndsWith(".tickers"))
-            {
-                System.Threading.Tasks.Task.Run(() =>
-                {
-                    try
-                    {
-                        HandleTickersMessage(message);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"{GetType().Name}.RouteMessage(): Error in async tickers handler: {ex}");
-                    }
-                });
-                return;
-            }
-
-            if (channel.EndsWith(".book_ticker"))
-            {
-                System.Threading.Tasks.Task.Run(() =>
-                {
-                    try
-                    {
-                        HandleBookTickerMessage(message);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"{GetType().Name}.RouteMessage(): Error in async book_ticker handler: {ex}");
-                    }
-                });
-                return;
-            }
-
-            if (channel.EndsWith(".order_book") || channel.EndsWith(".order_book_update"))
-            {
-                System.Threading.Tasks.Task.Run(() =>
-                {
-                    try
-                    {
-                        HandleOrderBookMessage(message);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"{GetType().Name}.RouteMessage(): Error in async order book handler: {ex}");
-                    }
-                });
-                return;
-            }
-
-            // ========================================
-            // ORDER OPERATION CHANNELS: Synchronous (critical for order state management)
-            // These handle WebSocket-based order placement/modification/cancellation responses
-            // ========================================
-
-            if (channel.EndsWith(".order_place"))
-            {
-                HandleOrderPlaceMessage(message);
-                return;
-            }
-
-            if (channel.EndsWith(".order_amend"))
-            {
-                HandleOrderAmendMessage(message);
-                return;
-            }
-
-            if (channel.EndsWith(".order_cancel"))
-            {
-                HandleOrderCancelMessage(message);
-                return;
-            }
-
-            // Unknown channel
-            Log.Trace($"{GetType().Name}.RouteMessage(): Unknown channel: {channel}");
-        }
-
         // ========================================
-        // SYSTEM MESSAGE HANDLERS
+        // EVENT MESSAGE HANDLERS
         // ========================================
 
         /// <summary>
-        /// Handles pong message
+        /// Handles event messages (subscribe, login, error)
         /// </summary>
-        protected virtual void HandlePongMessage()
+        protected virtual void HandleEventMessage(JObject jObject)
         {
-            // Pong received - connection is alive
-            _lastMessageTime = DateTime.UtcNow;
+            var response = jObject.ToObject<OKXWebSocketResponse>();
+
+            switch (response.Event)
+            {
+                case "login":
+                    HandleLoginEvent(response);
+                    break;
+
+                case "subscribe":
+                    HandleSubscribeEvent(response);
+                    break;
+
+                case "unsubscribe":
+                    HandleUnsubscribeEvent(response);
+                    break;
+
+                case "error":
+                    HandleErrorEvent(response);
+                    break;
+
+                default:
+                    Log.Trace($"{GetType().Name}: Unknown event type: {response.Event}");
+                    break;
+            }
         }
 
         /// <summary>
-        /// Handles login/authentication message
+        /// Handles login event
         /// </summary>
-        protected virtual void HandleLoginMessage(JObject message, string eventType)
+        protected virtual void HandleLoginEvent(OKXWebSocketResponse response)
         {
-            if (eventType != "api")
+            if (response.Code == "0")
             {
-                return;
-            }
-
-            var header = message["header"];
-            var status = header?["status"]?.ToString();
-
-            // OKX uses HTTP-style status codes: "200" for success
-            if (status == "200")
-            {
-                Log.Trace($"{GetType().Name}.HandleLoginMessage(): Authentication successful");
-
-                _isAuthenticated = true;
-
-                // Check if this is a reconnection (we previously sent a Disconnect notification)
-                if (_reconnectNotificationPending)
-                {
-                    _reconnectNotificationPending = false;
-
-                    // Notify LEAN engine that connection has been restored
-                    OnMessage(BrokerageMessageEvent.Reconnected(
-                        $"{GetType().Name} WebSocket connection restored and authenticated"
-                    ));
-                }
-                else
-                {
-                    // First-time connection, send Information
-                    OnMessage(new BrokerageMessageEvent(
-                        BrokerageMessageType.Information,
-                        "AuthenticationSuccess",
-                        $"{GetType().Name} WebSocket authentication successful"
-                    ));
-                }
-
-                // Subscribe to private channels after successful authentication
-                OnAuthenticationSuccess();
+                Log.Trace($"{GetType().Name}: Login successful (connId: {response.ConnectionId})");
             }
             else
             {
-                var error = message["data"]?["errs"]?.ToString() ?? message["error"]?.ToString() ?? "Unknown error";
-                Log.Error($"{GetType().Name}.HandleLoginMessage(): Authentication failed: {error}");
-
-                // Mark that we need to send Reconnect notification on next successful auth
-                _reconnectNotificationPending = true;
-
-                // Trigger framework reconnection by sending Disconnect event
+                Log.Error($"{GetType().Name}: Login failed - Code: {response.Code}, Message: {response.Message}");
                 OnMessage(new BrokerageMessageEvent(
-                    BrokerageMessageType.Disconnect,
-                    "AuthenticationFailed",
-                    $"{GetType().Name} WebSocket authentication failed: {error}"
-                ));
+                    BrokerageMessageType.Error,
+                    response.Code,
+                    $"WebSocket login failed: {response.Message}"));
             }
         }
 
         /// <summary>
-        /// Called after successful authentication
-        /// Automatically subscribes to private channels (orders, balances, usertrades)
+        /// Handles subscribe event
         /// </summary>
-        protected virtual void OnAuthenticationSuccess()
+        protected virtual void HandleSubscribeEvent(OKXWebSocketResponse response)
         {
-            Log.Trace($"{GetType().Name}.OnAuthenticationSuccess(): Subscribing to private channels...");
-            SubscribePrivateChannels();
-        }
-
-        // ========================================
-        // MARKET DATA HANDLERS
-        // ========================================
-
-        /// <summary>
-        /// Handles trades message (public channel)
-        /// OKX trades format differs by market type:
-        /// - Spot (spot.trades): result is a single Object
-        /// - Futures (futures.trades): result is an Array of Objects
-        /// </summary>
-        protected virtual void HandleTradesMessage(JObject message)
-        {
-            try
+            if (response.Code == "0")
             {
-                var trades = NormalizeResultToArray<OKXTrade>(message["result"]);
-                foreach (var okxTrade in trades)
-                {
-                    var tick = okxTrade.ToTick(_symbolMapper, SupportedSecurityType);
-                    _aggregator.Update(tick);
-                }
+                var channel = response.Arg?.Channel;
+                var instId = response.Arg?.InstrumentId;
+                var key = string.IsNullOrEmpty(instId) ? channel : $"{channel}:{instId}";
+                Log.Trace($"{GetType().Name}: Subscription confirmed - {key}");
             }
-            catch (Exception ex)
+            else
             {
-                Log.Error($"{GetType().Name}.HandleTradesMessage(): Error: {ex.Message}");
+                Log.Error($"{GetType().Name}: Subscription failed - Code: {response.Code}, Message: {response.Message}");
             }
         }
 
         /// <summary>
-        /// Handles tickers message (public channel)
+        /// Handles unsubscribe event
         /// </summary>
-        protected virtual void HandleTickersMessage(JObject message)
+        protected virtual void HandleUnsubscribeEvent(OKXWebSocketResponse response)
         {
-            try
-            {
-                // NormalizeResultToArray handles null/empty checks and filters invalid tickers
-                // Invalid tickers (missing currency_pair) are logged by TickerConverter
-                var tickers = NormalizeResultToArray<OKXTicker>(message["result"]);
-
-                foreach (var ticker in tickers)
-                {
-                    // Convert to LEAN Quote Tick (guaranteed valid ticker)
-                    var tick = ticker.ToQuoteTick(_symbolMapper, SupportedSecurityType);
-
-                    _aggregator.Update(tick);
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.HandleTickersMessage(): Error: {ex.Message}");
-            }
+            var channel = response.Arg?.Channel;
+            var instId = response.Arg?.InstrumentId;
+            var key = string.IsNullOrEmpty(instId) ? channel : $"{channel}:{instId}";
+            Log.Trace($"{GetType().Name}: Unsubscription confirmed - {key}");
         }
 
         /// <summary>
-        /// Handles book ticker message (public channel)
-        /// Used by Futures market for real-time quote data (best bid/ask)
+        /// Handles error event
         /// </summary>
-        protected virtual void HandleBookTickerMessage(JObject message)
+        protected virtual void HandleErrorEvent(OKXWebSocketResponse response)
         {
-            try
-            {
-                // NormalizeResultToArray handles null/empty checks and filters invalid book tickers
-                // Invalid book tickers (missing contract) are logged by BookTickerConverter
-                var bookTickers = NormalizeResultToArray<OKXBookTicker>(message["result"]);
-
-                foreach (var bookTicker in bookTickers)
-                {
-                    // Convert to LEAN Quote Tick (guaranteed valid, BestBid/BestAsk already decimal)
-                    var tick = bookTicker.ToQuoteTick(_symbolMapper, SupportedSecurityType);
-
-                    // Mark WebSocket data received for this symbol (prevents REST data from being used)
-                    if (_quoteTickContexts.TryGetValue(tick.Symbol, out var context))
-                    {
-                        lock (context.Lock)
-                        {
-                            context.HasReceivedWebSocketData = true;
-                        }
-                    }
-
-                    _aggregator.Update(tick);
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.HandleBookTickerMessage(): Error: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Lightweight WebSocket message handler - only writes to Channel
-        /// All processing logic moved to ProcessOrderBookUpdatesAsync consumer
-        /// </summary>
-        protected virtual void HandleOrderBookMessage(JObject message)
-        {
-            try
-            {
-                var channel = message["channel"]?.ToString();
-                var result = message["result"];
-
-                if (result == null)
-                {
-                    return;
-                }
-
-                var update = result.ToObject<Messages.OrderBookUpdate>();
-                if (update == null || string.IsNullOrEmpty(update.CurrencyPair))
-                {
-                    return;
-                }
-
-                // Determine security type from channel
-                var securityType = channel?.StartsWith("spot") == true ? SecurityType.Crypto : SecurityType.CryptoFuture;
-                var symbol = _symbolMapper.GetLeanSymbol(update.CurrencyPair, securityType, Market.OKX);
-
-                // Get order book context (should exist after subscription)
-                if (!_orderBookContexts.TryGetValue(symbol, out var context))
-                {
-                    return;
-                }
-
-                // Write to Channel (non-blocking, consumer processes asynchronously)
-                if (!context.MessageChannel.Writer.TryWrite(update))
-                {
-                    Log.Error($"{GetType().Name}.HandleOrderBookMessage(): Channel write failed for {symbol}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.HandleOrderBookMessage(): Error: {ex}");
-            }
-        }
-
-        // ========================================
-        // PRIVATE CHANNEL HANDLERS
-        // ========================================
-
-        /// <summary>
-        /// Handles order update messages (private channel)
-        /// Must be implemented by subclasses (OKXSpotBrokerage, OKXFuturesBrokerage) to handle
-        /// market-specific order formats (SpotOrder vs FuturesOrder)
-        /// </summary>
-        /// <remarks>
-        /// Only handles cancellation events (event="finish" + finish_as="cancelled")
-        /// Other events are handled by:
-        /// - event="put" (Submitted) → HandleOrderPlaceMessage
-        /// - event="update" (PartiallyFilled) → HandleUserTradesMessage
-        /// - event="finish" + finish_as="filled" (Filled) → HandleUserTradesMessage
-        /// </remarks>
-        protected abstract void HandleOrdersMessage(JObject message);
-
-        /// <summary>
-        /// Emits a Canceled OrderEvent and performs cleanup
-        /// Shared by Spot and Futures order handlers
-        /// </summary>
-        /// <param name="leanOrder">The LEAN order to cancel</param>
-        /// <param name="reason">Cancellation reason from OKX (finish_as field)</param>
-        protected void EmitCancelledOrderEvent(Order leanOrder, string reason)
-        {
-            var cancelMessage = string.IsNullOrEmpty(leanOrder.Tag)
-                ? $"Canceled - {reason}"
-                : $"{leanOrder.Tag} | Canceled - {reason}";
-
-            var orderEvent = new OrderEvent(
-                leanOrder.Id,
-                leanOrder.Symbol,
-                DateTime.UtcNow,
-                OrderStatus.Canceled,
-                leanOrder.Direction,
-                0,  // No fill on cancellation
-                0,  // No fill quantity
-                OrderFee.Zero,
-                cancelMessage
-            );
-
-            OnOrderEvent(orderEvent);
-
-            // Clean up
-            CachedOrderIDs.TryRemove(leanOrder.Id, out _);
-            _fills.TryRemove(leanOrder.Id, out _);
-
-            // Remove from reverse mapping
-            foreach (var brokerId in leanOrder.BrokerId)
-            {
-                _ordersByBrokerId.TryRemove(brokerId, out _);
-            }
-        }
-
-        /// <summary>
-        /// Handles user trades message (private channel)
-        /// This is the PRIMARY handler for fill events (PartiallyFilled and Filled statuses)
-        /// Provides accurate fill prices, quantities, and fees from actual trade executions
-        /// Must be implemented by subclasses (OKXSpotBrokerage, OKXFuturesBrokerage) to handle
-        /// market-specific trade formats (SpotUserTrade vs FuturesUserTrade)
-        /// </summary>
-        /// <remarks>
-        /// Implementation guidelines:
-        /// 1. Use NormalizeResultToArray to deserialize trades
-        /// 2. Look up LEAN order using _ordersByBrokerId
-        /// 3. Track fills using EmitUserTradeFillEvent helper
-        /// 4. Handle market-specific field differences (amount vs size, etc.)
-        /// </remarks>
-        protected abstract void HandleUserTradesMessage(JObject message);
-
-        /// <summary>
-        /// Emits a user trade fill event and tracks cumulative fills
-        /// Shared logic for both Spot and Futures implementations
-        /// </summary>
-        /// <param name="orderEvent">The order event generated from the trade</param>
-        /// <param name="fillQuantity">The quantity filled by this trade (absolute value)</param>
-        protected void EmitUserTradeFillEvent(OrderEvent orderEvent, decimal fillQuantity)
-        {
-            // Find the LEAN order
-            if (!CachedOrderIDs.TryGetValue(orderEvent.OrderId, out var order))
-            {
-                Log.Error($"{GetType().Name}.EmitUserTradeFillEvent(): Order {orderEvent.OrderId} not found in cache");
-                return;
-            }
-
-            // Track cumulative fills
-            var totalFillQuantity = _fills.GetOrAdd(order.Id, 0) + fillQuantity;
-            _fills[order.Id] = totalFillQuantity;
-
-            // Update status based on cumulative fills
-            orderEvent.Status = Math.Abs(totalFillQuantity) >= Math.Abs(order.Quantity)
-                ? OrderStatus.Filled
-                : OrderStatus.PartiallyFilled;
-
-            // Emit the order event
-            OnOrderEvent(orderEvent);
-
-            // Clean up if fully filled
-            if (orderEvent.Status == OrderStatus.Filled)
-            {
-                CachedOrderIDs.TryRemove(order.Id, out _);
-                _fills.TryRemove(order.Id, out _);
-
-                // Remove from reverse mapping
-                foreach (var brokerId in order.BrokerId)
-                {
-                    _ordersByBrokerId.TryRemove(brokerId, out _);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Handles balance update messages (private channel)
-        /// Must be implemented by subclasses (OKXSpotBrokerage, OKXFuturesBrokerage) to handle
-        /// market-specific balance formats (SpotBalanceUpdate vs FuturesBalanceUpdate)
-        /// </summary>
-        protected abstract void HandleBalancesMessage(JObject message);
-
-        // ========================================
-        // ORDER OPERATION MESSAGE HANDLERS
-        // ========================================
-
-        /// <summary>
-        /// Handles order placement response from order_place channel (WebSocket order placement)
-        /// Processes both ACK (acknowledgment) and Result (order created) messages
-        /// </summary>
-        protected virtual void HandleOrderPlaceMessage(JObject message)
-        {
-            try
-            {
-                // Check for request_id and ack fields
-                var requestId = message["request_id"]?.ToString();
-                var ack = message["ack"]?.ToObject<bool?>() ?? false;
-
-                // ACK messages are just acknowledgments, not the final response
-                if (ack) return;
-
-                // This is the actual response (ack=false or missing) - order successfully created or error
-                var data = message["data"];
-
-                // Find corresponding LEAN order by request_id
-                // We need to do this before checking errors so we can emit Invalid event
-                if (!_pendingOrdersByRequestId.TryRemove(requestId, out var order))
-                {
-                    Log.Error($"{GetType().Name}.HandleOrderPlaceMessage(): Order not found for request_id: {requestId}");
-                    return;
-                }
-
-                // Check for error response (OKX uses data.errs format for order_place)
-                var errs = data?["errs"];
-                if (errs != null)
-                {
-                    Log.Error($"{GetType().Name}.HandleOrderPlaceMessage(): Order place error - RequestId: {requestId}, Errs: {errs}");
-                    EmitOrderOperationError("place", order, errs);
-                    return;
-                }
-
-                var result = data?["result"];
-
-                // Determine market type from ChannelPrefix (spot vs futures)
-                var isFutures = ChannelPrefix == "futures";
-
-                // Deserialize and extract brokerage order ID based on market type
-                // Use NormalizeResultToArray for consistent deserialization (Converter validates fields)
-                string brokerageOrderId;
-                if (isFutures)
-                {
-                    var futuresOrders = NormalizeResultToArray<Messages.FuturesOrder>(result);
-                    if (futuresOrders.Count == 0)
-                    {
-                        Log.Error($"{GetType().Name}.HandleOrderPlaceMessage(): Failed to deserialize Futures order (Converter returned null)");
-                        return;
-                    }
-                    brokerageOrderId = futuresOrders[0].Id;
-                }
-                else
-                {
-                    var spotOrders = NormalizeResultToArray<Messages.SpotOrder>(result);
-                    if (spotOrders.Count == 0)
-                    {
-                        Log.Error($"{GetType().Name}.HandleOrderPlaceMessage(): Failed to deserialize Spot order (Converter returned null)");
-                        return;
-                    }
-                    brokerageOrderId = spotOrders[0].Id;
-                }
-
-                // Register order and emit Submitted event
-                EmitOrderSubmittedEvent(order, brokerageOrderId);
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.HandleOrderPlaceMessage(): {ex}");
-            }
-        }
-
-        /// <summary>
-        /// Emits order operation error notifications
-        /// Unified error handling for order_place/order_amend/order_cancel failures
-        /// </summary>
-        /// <param name="operationType">Operation type: "place", "amend", "cancel"</param>
-        /// <param name="leanOrder">LEAN order (required for place failure, optional for amend/cancel)</param>
-        /// <param name="errorObject">Error object (data.errs for place, message.error for amend/cancel)</param>
-        protected void EmitOrderOperationError(
-            string operationType,
-            Order leanOrder,
-            JToken errorObject)
-        {
-            if (errorObject == null)
-            {
-                Log.Error($"{GetType().Name}.EmitOrderOperationError(): Order {operationType} failed - No error details provided");
-                return;
-            }
-
-            // Extract error code and message
-            // order_place uses: data.errs { label, message }
-            // order_amend/cancel use: message.error { code, message }
-            var errorCode = errorObject["label"]?.ToString() ?? errorObject["code"]?.ToString();
-            var errorMessage = errorObject["message"]?.ToString();
-
-            // Always send BrokerageMessageEvent (user notification)
-            // Use Warning (not Error) because Error triggers SetRuntimeError() and stops the algorithm
-            // Order failures are business-level issues, not system-level errors
+            Log.Error($"{GetType().Name}: WebSocket error - Code: {response.Code}, Message: {response.Message}");
             OnMessage(new BrokerageMessageEvent(
                 BrokerageMessageType.Warning,
-                errorCode,
-                $"Order {operationType} failed: {errorMessage}"));
-
-            // OrderEvent is only sent for place failures (order becomes Invalid)
-            // For amend/cancel failures, order status remains unchanged
-            if (operationType == "place" && leanOrder != null)
-            {
-                var invalidMessage = string.IsNullOrEmpty(leanOrder.Tag)
-                    ? $"{errorCode}: {errorMessage}"
-                    : $"{leanOrder.Tag} | {errorCode}: {errorMessage}";
-
-                OnOrderEvent(new OrderEvent(leanOrder, DateTime.UtcNow, OrderFee.Zero)
-                {
-                    Status = OrderStatus.Invalid,
-                    Message = invalidMessage
-                });
-            }
+                response.Code,
+                $"WebSocket error: {response.Message}"));
         }
 
+        // ========================================
+        // DATA MESSAGE HANDLERS
+        // ========================================
+
         /// <summary>
-        /// Registers order with brokerage ID and emits Submitted event
-        /// Encapsulates the common logic from HandleOrderPlaceMessage (line 730+):
-        /// - Adds BrokerId to order
-        /// - Caches order in CachedOrderIDs
-        /// - Establishes reverse mapping (_ordersByBrokerId)
-        /// - Emits OrderEvent(Submitted)
+        /// Handles data push messages
         /// </summary>
-        /// <param name="leanOrder">LEAN order</param>
-        /// <param name="brokerageOrderId">Brokerage order ID from OKX</param>
-        protected void EmitOrderSubmittedEvent(Order leanOrder, string brokerageOrderId)
+        protected virtual void HandleDataMessage(JObject jObject)
         {
-            // Add brokerage ID
-            leanOrder.BrokerId.Add(brokerageOrderId);
+            var arg = jObject["arg"].ToObject<OKXWebSocketChannel>();
+            var channel = arg.Channel;
 
-            // Cache LEAN order
-            CachedOrderIDs[leanOrder.Id] = leanOrder;
-
-            // Establish reverse mapping (O(1) lookup)
-            _ordersByBrokerId.TryAdd(brokerageOrderId, leanOrder);
-
-            // Emit Submitted event
-            var submittedMessage = string.IsNullOrEmpty(leanOrder.Tag)
-                ? $"Brokerage ID: {brokerageOrderId}"
-                : $"{leanOrder.Tag} | Brokerage ID: {brokerageOrderId}";
-
-            OnOrderEvent(new OrderEvent(leanOrder, DateTime.UtcNow, OrderFee.Zero)
+            // Route to appropriate handler based on channel
+            switch (channel)
             {
-                Status = OrderStatus.Submitted,
-                Message = submittedMessage
-            });
-        }
+                case "orders":
+                    HandleOrdersChannel(jObject);
+                    break;
 
-        /// <summary>
-        /// Handles order amend response from order_amend channel (WebSocket order modification)
-        /// Supports both Spot and Futures orders
-        /// Follows WebsocketRouteMessageArch.md architecture pattern
-        /// </summary>
-        protected virtual void HandleOrderAmendMessage(JObject message)
-        {
-            try
-            {
-                var data = message["data"];
-                // Check for error response
-                var error = data?["errs"];
-                if (error != null)
-                {
-                    EmitOrderOperationError("amend", null, error);
-                    return;
-                }
+                case "account":
+                    HandleAccountChannel(jObject);
+                    break;
 
-                var result = data?["result"];
+                case "positions":
+                    HandlePositionsChannel(jObject);
+                    break;
 
-                // Determine market type from ChannelPrefix (spot vs futures)
-                var isFutures = ChannelPrefix == "futures";
+                case "tickers":
+                    HandleTickersChannel(jObject);
+                    break;
 
-                // Deserialize single order object (order_amend returns object, not array)
-                // Converter validates required fields
-                string brokerageOrderId;
-                string statusInfo;
-                if (isFutures)
-                {
-                    var futuresOrder = result?.ToObject<Messages.FuturesOrder>();
-                    if (futuresOrder == null)
-                    {
-                        Log.Error($"{GetType().Name}.HandleOrderAmendMessage(): Failed to deserialize Futures order (Converter returned null)");
-                        return;
-                    }
-                    brokerageOrderId = futuresOrder.Id;
-                    statusInfo = $"New Size: {futuresOrder.Size}, New Price: {futuresOrder.Price}, Status: {futuresOrder.Status}";
-                }
-                else
-                {
-                    var spotOrder = result?.ToObject<Messages.SpotOrder>();
-                    if (spotOrder == null)
-                    {
-                        Log.Error($"{GetType().Name}.HandleOrderAmendMessage(): Failed to deserialize Spot order (Converter returned null)");
-                        return;
-                    }
-                    brokerageOrderId = spotOrder.Id;
-                    statusInfo = $"New Amount: {spotOrder.Amount}, New Price: {spotOrder.Price}";
-                }
+                case "trades":
+                    HandleTradesChannel(jObject);
+                    break;
 
-                // Find corresponding LEAN order by brokerage ID
-                if (!_ordersByBrokerId.TryGetValue(brokerageOrderId, out var leanOrder))
-                {
-                    Log.Error($"{GetType().Name}.HandleOrderAmendMessage(): Order not found for brokerage ID: {brokerageOrderId}");
-                    return;
-                }
+                case "books":
+                case "books5":
+                case "books-l2-tbt":
+                    HandleOrderBookChannel(jObject);
+                    break;
 
-                Log.Trace($"{GetType().Name}.HandleOrderAmendMessage(): Order amended successfully. " +
-                         $"LEAN ID: {leanOrder.Id}, Brokerage ID: {brokerageOrderId}, {statusInfo}");
-
-                // Emit order event with amended status
-                var amendedMessage = string.IsNullOrEmpty(leanOrder.Tag)
-                    ? "Amended via WebSocket"
-                    : $"{leanOrder.Tag} | Amended via WebSocket";
-
-                OnOrderEvent(new OrderEvent(leanOrder, DateTime.UtcNow, OrderFee.Zero)
-                {
-                    Status = OrderStatus.UpdateSubmitted,
-                    Message = amendedMessage
-                });
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.HandleOrderAmendMessage(): {ex}");
+                default:
+                    Log.Trace($"{GetType().Name}: Unknown channel: {channel}");
+                    break;
             }
         }
 
+        // ========================================
+        // PRIVATE CHANNEL HANDLERS (Orders, Account, Positions)
+        // ========================================
+
         /// <summary>
-        /// Handles order cancel response from order_cancel channel (WebSocket order cancellation)
-        /// Supports both Spot and Futures orders
-        /// Follows WebsocketRouteMessageArch.md architecture pattern
+        /// Handles orders channel data push
+        /// Channel: orders
+        /// Data: Array of order updates
         /// </summary>
-        protected virtual void HandleOrderCancelMessage(JObject message)
+        protected virtual void HandleOrdersChannel(JObject jObject)
         {
             try
             {
-                var data = message["data"];
-                // Check for error response
-                var error = data?["errs"];
-                if (error != null)
+                var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketOrder>>();
+
+                if (message.Data == null || message.Data.Count == 0)
                 {
-                    EmitOrderOperationError("cancel", null, error);
                     return;
                 }
 
-                var result = data?["result"];
-
-                // Determine market type from ChannelPrefix (spot vs futures)
-                var isFutures = ChannelPrefix == "futures";
-
-                // Deserialize single order object (order_cancel returns object, not array)
-                // Converter validates required fields
-                string brokerageOrderId;
-                if (isFutures)
+                foreach (var order in message.Data)
                 {
-                    var futuresOrder = result?.ToObject<Messages.FuturesOrder>();
-                    if (futuresOrder == null)
-                    {
-                        Log.Error($"{GetType().Name}.HandleOrderCancelMessage(): Failed to deserialize Futures order (Converter returned null)");
-                        return;
-                    }
-                    brokerageOrderId = futuresOrder.Id;
+                    HandleOrderUpdate(order);
                 }
-                else
-                {
-                    var spotOrder = result?.ToObject<Messages.SpotOrder>();
-                    if (spotOrder == null)
-                    {
-                        Log.Error($"{GetType().Name}.HandleOrderCancelMessage(): Failed to deserialize Spot order (Converter returned null)");
-                        return;
-                    }
-                    brokerageOrderId = spotOrder.Id;
-                }
-
-                // Find corresponding LEAN order by brokerage ID
-                if (!_ordersByBrokerId.TryGetValue(brokerageOrderId, out var leanOrder))
-                {
-                    Log.Error($"{GetType().Name}.HandleOrderCancelMessage(): Order not found for brokerage ID: {brokerageOrderId}");
-                    return;
-                }
-
-                Log.Trace($"{GetType().Name}.HandleOrderCancelMessage(): Order cancelled successfully. " +
-                         $"LEAN ID: {leanOrder.Id}, Brokerage ID: {brokerageOrderId}");
-
-                // Emit order event with cancelled status
-                var cancelledMessage = string.IsNullOrEmpty(leanOrder.Tag)
-                    ? "Cancelled via WebSocket"
-                    : $"{leanOrder.Tag} | Cancelled via WebSocket";
-
-                OnOrderEvent(new OrderEvent(leanOrder, DateTime.UtcNow, OrderFee.Zero)
-                {
-                    Status = OrderStatus.Canceled,
-                    Message = cancelledMessage
-                });
             }
             catch (Exception ex)
             {
-                Log.Error($"{GetType().Name}.HandleOrderCancelMessage(): {ex}");
+                Log.Error($"{GetType().Name}.HandleOrdersChannel(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles individual order update
+        /// </summary>
+        protected virtual void HandleOrderUpdate(OKXWebSocketOrder order)
+        {
+            try
+            {
+                // Parse client order ID to get LEAN order ID
+                if (!int.TryParse(order.ClientOrderId ?? "0", out var orderId))
+                {
+                    Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Cannot parse client order ID: {order.ClientOrderId}");
+                    return;
+                }
+
+                // Find LEAN order
+                if (!CachedOrderIDs.TryGetValue(orderId, out var leanOrder))
+                {
+                    Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Order not found in cache: {orderId}");
+                    return;
+                }
+
+                // Map OKX state to LEAN OrderStatus
+                var status = MapOrderState(order.State);
+
+                // Parse filled quantities and prices
+                decimal.TryParse(order.FilledSize ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var filledQty);
+                decimal.TryParse(order.AveragePrice ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var avgPrice);
+                decimal.TryParse(order.Fee ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var feeAmount);
+
+                // Determine fill quantity for this event
+                var previousFillQty = _fills.GetOrAdd(orderId, 0m);
+                var fillQuantityDelta = filledQty - previousFillQty;
+
+                // Update fill tracking
+                if (fillQuantityDelta > 0)
+                {
+                    _fills[orderId] = filledQty;
+                }
+
+                // Adjust sign based on order direction
+                var signedFillQty = order.Side == "buy" ? fillQuantityDelta : -fillQuantityDelta;
+
+                // Create order event
+                var orderEvent = new OrderEvent
+                {
+                    OrderId = orderId,
+                    Status = status,
+                    FillPrice = avgPrice,
+                    FillQuantity = signedFillQty,
+                    OrderFee = new OrderFee(new CashAmount(Math.Abs(feeAmount), order.FeeCurrency ?? "USDT")),
+                    UtcTime = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(order.UpdateTime)).UtcDateTime,
+                    Message = $"OKX order {order.OrderId}: {order.State}"
+                };
+
+                // Emit event
+                OnOrderEvent(orderEvent);
+
+                // Register brokerage ID mapping if first time seeing this order
+                if (!string.IsNullOrEmpty(order.OrderId) && !_ordersByBrokerId.ContainsKey(order.OrderId))
+                {
+                    _ordersByBrokerId.TryAdd(order.OrderId, leanOrder);
+
+                    // Add to BrokerId list if not already present
+                    if (!leanOrder.BrokerId.Contains(order.OrderId))
+                    {
+                        leanOrder.BrokerId.Add(order.OrderId);
+                    }
+                }
+
+                Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Order {order.OrderId} ({order.ClientOrderId}): {order.State}, Filled: {filledQty}, Avg Price: {avgPrice}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandleOrderUpdate(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Maps OKX order state to LEAN OrderStatus
+        /// </summary>
+        protected virtual OrderStatus MapOrderState(string okxState)
+        {
+            return okxState?.ToLowerInvariant() switch
+            {
+                "live" => OrderStatus.Submitted,
+                "partially_filled" => OrderStatus.PartiallyFilled,
+                "filled" => OrderStatus.Filled,
+                "canceled" => OrderStatus.Canceled,
+                "canceling" => OrderStatus.CancelPending,
+                _ => OrderStatus.None
+            };
+        }
+
+        /// <summary>
+        /// Handles account channel data push
+        /// Channel: account
+        /// Data: Array of account balance updates
+        /// </summary>
+        protected virtual void HandleAccountChannel(JObject jObject)
+        {
+            try
+            {
+                var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketAccount>>();
+
+                if (message.Data == null || message.Data.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var account in message.Data)
+                {
+                    HandleAccountUpdate(account);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandleAccountChannel(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles individual account update
+        /// </summary>
+        protected virtual void HandleAccountUpdate(OKXWebSocketAccount account)
+        {
+            try
+            {
+                Log.Trace($"{GetType().Name}.HandleAccountUpdate(): Total Equity: {account.TotalEquity}");
+
+                // Trigger account changed event (totalEq is in USD)
+                OnAccountChanged(new AccountEvent(
+                    "USD",
+                    decimal.TryParse(account.TotalEquity ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var totalEq) ? totalEq : 0m));
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandleAccountUpdate(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles positions channel data push
+        /// Channel: positions
+        /// Data: Array of position updates
+        /// </summary>
+        protected virtual void HandlePositionsChannel(JObject jObject)
+        {
+            try
+            {
+                var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketPosition>>();
+
+                if (message.Data == null || message.Data.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var position in message.Data)
+                {
+                    HandlePositionUpdate(position);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandlePositionsChannel(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles individual position update
+        /// </summary>
+        protected virtual void HandlePositionUpdate(OKXWebSocketPosition position)
+        {
+            try
+            {
+                Log.Trace($"{GetType().Name}.HandlePositionUpdate(): {position.InstrumentId} Position: {position.Position}, UPL: {position.UnrealizedPnL}");
+
+                // Position updates can trigger AccountChanged event if needed
+                // Implementation depends on specific requirements
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandlePositionUpdate(): Error: {ex.Message}");
+            }
+        }
+
+        // ========================================
+        // PUBLIC CHANNEL HANDLERS (Market Data)
+        // ========================================
+
+        /// <summary>
+        /// Handles tickers channel data push
+        /// Channel: tickers
+        /// Data: Array of ticker updates (usually 1 element)
+        /// </summary>
+        protected virtual void HandleTickersChannel(JObject jObject)
+        {
+            try
+            {
+                var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketTicker>>();
+
+                if (message.Data == null || message.Data.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var ticker in message.Data)
+                {
+                    HandleTickerUpdate(ticker);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandleTickersChannel(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles individual ticker update
+        /// </summary>
+        protected virtual void HandleTickerUpdate(OKXWebSocketTicker ticker)
+        {
+            try
+            {
+                // Get LEAN symbol
+                var securityType = GetSecurityType(ticker.InstrumentId);
+                var symbol = _symbolMapper.GetLeanSymbol(ticker.InstrumentId, securityType, Market.OKX);
+
+                // Parse prices and sizes
+                if (!decimal.TryParse(ticker.Last, NumberStyles.Any, CultureInfo.InvariantCulture, out var lastPrice))
+                    return;
+                if (!decimal.TryParse(ticker.BidPrice, NumberStyles.Any, CultureInfo.InvariantCulture, out var bidPrice))
+                    return;
+                if (!decimal.TryParse(ticker.AskPrice, NumberStyles.Any, CultureInfo.InvariantCulture, out var askPrice))
+                    return;
+                if (!decimal.TryParse(ticker.BidSize, NumberStyles.Any, CultureInfo.InvariantCulture, out var bidSize))
+                    return;
+                if (!decimal.TryParse(ticker.AskSize, NumberStyles.Any, CultureInfo.InvariantCulture, out var askSize))
+                    return;
+
+                var time = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(ticker.Timestamp)).UtcDateTime;
+
+                // Create quote tick
+                var quote = new Tick
+                {
+                    Symbol = symbol,
+                    Time = time,
+                    TickType = TickType.Quote,
+                    BidPrice = bidPrice,
+                    AskPrice = askPrice,
+                    BidSize = bidSize,
+                    AskSize = askSize,
+                    Value = lastPrice
+                };
+
+                // Send to aggregator
+                _aggregator.Update(quote);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandleTickerUpdate(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles trades channel data push
+        /// Channel: trades
+        /// Data: Array of trade updates
+        /// </summary>
+        protected virtual void HandleTradesChannel(JObject jObject)
+        {
+            try
+            {
+                var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketTrade>>();
+
+                if (message.Data == null || message.Data.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var trade in message.Data)
+                {
+                    HandleTradeUpdate(trade);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandleTradesChannel(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles individual trade update
+        /// </summary>
+        protected virtual void HandleTradeUpdate(OKXWebSocketTrade trade)
+        {
+            try
+            {
+                // Get LEAN symbol
+                var securityType = GetSecurityType(trade.InstrumentId);
+                var symbol = _symbolMapper.GetLeanSymbol(trade.InstrumentId, securityType, Market.OKX);
+
+                // Parse price and size
+                if (!decimal.TryParse(trade.Price, NumberStyles.Any, CultureInfo.InvariantCulture, out var price))
+                    return;
+                if (!decimal.TryParse(trade.Size, NumberStyles.Any, CultureInfo.InvariantCulture, out var size))
+                    return;
+
+                var time = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(trade.Timestamp)).UtcDateTime;
+
+                // Create trade tick
+                var tick = new Tick
+                {
+                    Symbol = symbol,
+                    Time = time,
+                    TickType = TickType.Trade,
+                    Value = price,
+                    Quantity = size
+                };
+
+                // Send to aggregator
+                _aggregator.Update(tick);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandleTradeUpdate(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles order book channel data push
+        /// Channel: books, books5, books-l2-tbt
+        /// Data: Array of order book snapshots/updates
+        /// </summary>
+        protected virtual void HandleOrderBookChannel(JObject jObject)
+        {
+            try
+            {
+                var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketOrderBook>>();
+
+                if (message.Data == null || message.Data.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var orderBook in message.Data)
+                {
+                    HandleOrderBookUpdate(orderBook, message.Action);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandleOrderBookChannel(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles individual order book update
+        /// </summary>
+        protected virtual void HandleOrderBookUpdate(OKXWebSocketOrderBook orderBook, string action)
+        {
+            try
+            {
+                // Get LEAN symbol
+                var securityType = GetSecurityType(orderBook.InstrumentId);
+                var symbol = _symbolMapper.GetLeanSymbol(orderBook.InstrumentId, securityType, Market.OKX);
+
+                var time = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(orderBook.Timestamp)).UtcDateTime;
+
+                // Extract top of book if available
+                if (orderBook.Bids != null && orderBook.Bids.Count > 0 &&
+                    orderBook.Asks != null && orderBook.Asks.Count > 0)
+                {
+                    var topBid = orderBook.Bids[0];
+                    var topAsk = orderBook.Asks[0];
+
+                    if (topBid.Count >= 2 && topAsk.Count >= 2 &&
+                        decimal.TryParse(topBid[0], NumberStyles.Any, CultureInfo.InvariantCulture, out var bidPrice) &&
+                        decimal.TryParse(topBid[1], NumberStyles.Any, CultureInfo.InvariantCulture, out var bidSize) &&
+                        decimal.TryParse(topAsk[0], NumberStyles.Any, CultureInfo.InvariantCulture, out var askPrice) &&
+                        decimal.TryParse(topAsk[1], NumberStyles.Any, CultureInfo.InvariantCulture, out var askSize))
+                    {
+                        // Create quote tick from order book top
+                        var quote = new Tick
+                        {
+                            Symbol = symbol,
+                            Time = time,
+                            TickType = TickType.Quote,
+                            BidPrice = bidPrice,
+                            AskPrice = askPrice,
+                            BidSize = bidSize,
+                            AskSize = askSize
+                        };
+
+                        // Send to aggregator
+                        _aggregator.Update(quote);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandleOrderBookUpdate(): Error: {ex.Message}");
             }
         }
     }

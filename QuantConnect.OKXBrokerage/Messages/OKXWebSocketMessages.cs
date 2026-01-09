@@ -64,6 +64,12 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// </summary>
         [JsonProperty("connId")]
         public string ConnectionId { get; set; }
+
+        /// <summary>
+        /// Channel argument (for subscribe/unsubscribe responses)
+        /// </summary>
+        [JsonProperty("arg", NullValueHandling = NullValueHandling.Ignore)]
+        public OKXWebSocketChannel Arg { get; set; }
     }
 
     /// <summary>
