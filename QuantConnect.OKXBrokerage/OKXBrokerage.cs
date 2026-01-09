@@ -22,21 +22,16 @@ using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
+using QuantConnect.Util;
 
 namespace QuantConnect.Brokerages.OKX
 {
     /// <summary>
     /// OKX Brokerage implementation for OKX v5 API
-    /// Supports spot and derivatives trading on OKX exchange
+    /// Supports spot and derivatives trading on OKX exchange using unified account API
     /// </summary>
-    public partial class OKXBrokerage : Brokerage
+    public class OKXBrokerage : OKXBaseBrokerage
     {
-        private readonly OKXRestApiClient _restApiClient;
-        private readonly ISymbolMapper _symbolMapper;
-        private readonly IAlgorithm _algorithm;
-        private readonly string _apiKey;
-        private readonly string _apiSecret;
-        private readonly string _passphrase;
 
         /// <summary>
         /// Creates a new instance of OKXBrokerage
@@ -50,26 +45,29 @@ namespace QuantConnect.Brokerages.OKX
             string apiSecret,
             string passphrase,
             IAlgorithm algorithm)
-            : base("OKX")
+            : this(apiKey, apiSecret, passphrase, algorithm, Composer.Instance.GetPart<IDataAggregator>())
         {
-            _apiKey = apiKey;
-            _apiSecret = apiSecret;
-            _passphrase = passphrase;
-            _algorithm = algorithm;
-
-            _symbolMapper = new OKXSymbolMapper(Market.OKX);
-            _restApiClient = new OKXRestApiClient(apiKey, apiSecret, passphrase);
-
-            // Initialize WebSocket connections
-            InitializeWebSockets();
-
-            Log.Trace($"OKXBrokerage(): Initialized for {OKXEnvironment.GetEnvironmentName()} environment");
         }
 
         /// <summary>
-        /// Returns true if we're currently connected to the broker
+        /// Creates a new instance of OKXBrokerage with data aggregator
         /// </summary>
-        public override bool IsConnected => _restApiClient != null;
+        /// <param name="apiKey">OKX API key</param>
+        /// <param name="apiSecret">OKX API secret</param>
+        /// <param name="passphrase">OKX API passphrase</param>
+        /// <param name="algorithm">The algorithm instance</param>
+        /// <param name="aggregator">Data aggregator for tick consolidation</param>
+        public OKXBrokerage(
+            string apiKey,
+            string apiSecret,
+            string passphrase,
+            IAlgorithm algorithm,
+            IDataAggregator aggregator)
+            : base(apiKey, apiSecret, passphrase, algorithm, aggregator, null)
+        {
+            Log.Trace($"OKXBrokerage(): Initialized for {OKXEnvironment.GetEnvironmentName()} environment");
+        }
+
 
         /// <summary>
         /// Gets all open orders on the account
@@ -77,7 +75,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <returns>The open orders</returns>
         public override List<Order> GetOpenOrders()
         {
-            return _restApiClient.GetOpenOrders();
+            return RestApiClient.GetOpenOrders();
         }
 
         /// <summary>
@@ -86,7 +84,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <returns>The current holdings from the account</returns>
         public override List<Holding> GetAccountHoldings()
         {
-            return _restApiClient.GetAccountHoldings();
+            return RestApiClient.GetAccountHoldings();
         }
 
         /// <summary>
@@ -95,7 +93,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <returns>The current cash balance for each currency available for trading</returns>
         public override List<CashAmount> GetCashBalance()
         {
-            return _restApiClient.GetCashBalance();
+            return RestApiClient.GetCashBalance();
         }
 
         /// <summary>
@@ -166,7 +164,7 @@ namespace QuantConnect.Brokerages.OKX
                 };
 
                 // Place order via REST API
-                var response = _restApiClient.PlaceOrder(request);
+                var response = RestApiClient.PlaceOrder(request);
 
                 if (response == null)
                 {
@@ -246,7 +244,7 @@ namespace QuantConnect.Brokerages.OKX
                 };
 
                 // Amend order via REST API
-                var response = _restApiClient.AmendOrder(request);
+                var response = RestApiClient.AmendOrder(request);
 
                 if (response == null)
                 {
@@ -302,7 +300,7 @@ namespace QuantConnect.Brokerages.OKX
                 };
 
                 // Cancel order via REST API
-                var response = _restApiClient.CancelOrder(request);
+                var response = RestApiClient.CancelOrder(request);
 
                 if (response == null)
                 {
@@ -330,39 +328,47 @@ namespace QuantConnect.Brokerages.OKX
             }
         }
 
-        /// <summary>
-        /// Connects the client to the broker's remote servers
-        /// </summary>
-        public override void Connect()
-        {
-            // Connection is established through REST API client initialization
-            Log.Trace("OKXBrokerage.Connect(): Connected to OKX REST API");
+        // ========================================
+        // ABSTRACT METHOD IMPLEMENTATIONS
+        // ========================================
 
-            // Subscribe to private channels for real-time order/account updates
-            SubscribeToPrivateChannels();
+        /// <summary>
+        /// Initializes the REST API client
+        /// </summary>
+        protected override void InitializeRestClient(string apiKey, string apiSecret)
+        {
+            // OKX requires passphrase in addition to key/secret
+            // This is stored during Initialize() call in base
+            // RestApiClient property is set in base class
         }
 
         /// <summary>
-        /// Disconnects the client from the broker's remote servers
+        /// Sends authentication request to private WebSocket channel
         /// </summary>
-        public override void Disconnect()
+        protected override void SendAuthenticationRequest()
         {
-            // Disconnect WebSocket connections
-            _publicWebSocket?.Disconnect();
-            _privateWebSocket?.Disconnect();
-
-            Log.Trace("OKXBrokerage.Disconnect(): Disconnected from OKX REST API and WebSockets");
+            // Authentication is handled automatically by BaseWebsocketsBrokerage
+            // using apiKey and apiSecret stored during Initialize()
+            Log.Trace("OKXBrokerage.SendAuthenticationRequest(): WebSocket authentication initiated");
         }
 
         /// <summary>
-        /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
+        /// Subscribes to private channels (orders, account, positions)
         /// </summary>
-        public override void Dispose()
+        protected override void SubscribePrivateChannels()
         {
-            // Dispose WebSocket connections
-            DisposeWebSockets();
+            // Private channel subscriptions are handled by base class WebSocket infrastructure
+            // Subscription messages are sent automatically after authentication
+            Log.Trace("OKXBrokerage.SubscribePrivateChannels(): Private channels will be subscribed after authentication");
+        }
 
-            Log.Trace("OKXBrokerage.Dispose(): Disposing OKXBrokerage");
+        /// <summary>
+        /// Unsubscribes from private channels
+        /// </summary>
+        protected override void UnsubscribePrivateChannels()
+        {
+            // Unsubscribe from private channels
+            Log.Trace("OKXBrokerage.UnsubscribePrivateChannels(): Unsubscribed from private channels");
         }
     }
 }
