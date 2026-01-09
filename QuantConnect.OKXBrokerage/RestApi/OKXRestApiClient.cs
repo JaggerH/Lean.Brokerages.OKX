@@ -474,5 +474,129 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 return null;
             }
         }
+
+        // ========================================
+        // ORDER MANAGEMENT
+        // ========================================
+
+        /// <summary>
+        /// Places a new order
+        /// https://www.okx.com/docs-v5/en/#rest-api-trade-place-order
+        /// Requires authentication
+        /// </summary>
+        /// <param name="request">Order request</param>
+        /// <returns>Place order response, or null if request fails</returns>
+        public OKXPlaceOrderResponse PlaceOrder(OKXPlaceOrderRequest request)
+        {
+            try
+            {
+                var response = Post<OKXApiResponse<OKXPlaceOrderResponse>>(
+                    "/trade/order",
+                    request,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess || response.Data == null || response.Data.Count == 0)
+                {
+                    Log.Error($"OKXRestApiClient.PlaceOrder(): Failed to place order - code: {response?.Code}, msg: {response?.Message}");
+                    return null;
+                }
+
+                var orderResponse = response.Data[0];
+
+                // Check if order placement was successful (sCode = "0")
+                if (orderResponse.StatusCode != "0")
+                {
+                    Log.Error($"OKXRestApiClient.PlaceOrder(): Order rejected - code: {orderResponse.StatusCode}, msg: {orderResponse.StatusMessage}");
+                    return null;
+                }
+
+                return orderResponse;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.PlaceOrder(): Exception: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Amends an existing order (modify quantity or price)
+        /// https://www.okx.com/docs-v5/en/#rest-api-trade-amend-order
+        /// Requires authentication
+        /// </summary>
+        /// <param name="request">Amend order request</param>
+        /// <returns>Amend order response, or null if request fails</returns>
+        public OKXAmendOrderResponse AmendOrder(OKXAmendOrderRequest request)
+        {
+            try
+            {
+                var response = Post<OKXApiResponse<OKXAmendOrderResponse>>(
+                    "/trade/amend-order",
+                    request,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess || response.Data == null || response.Data.Count == 0)
+                {
+                    Log.Error($"OKXRestApiClient.AmendOrder(): Failed to amend order - code: {response?.Code}, msg: {response?.Message}");
+                    return null;
+                }
+
+                var amendResponse = response.Data[0];
+
+                // Check if amendment was successful (sCode = "0")
+                if (amendResponse.StatusCode != "0")
+                {
+                    Log.Error($"OKXRestApiClient.AmendOrder(): Amendment rejected - code: {amendResponse.StatusCode}, msg: {amendResponse.StatusMessage}");
+                    return null;
+                }
+
+                return amendResponse;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.AmendOrder(): Exception: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Cancels an existing order
+        /// https://www.okx.com/docs-v5/en/#rest-api-trade-cancel-order
+        /// Requires authentication
+        /// </summary>
+        /// <param name="request">Cancel order request</param>
+        /// <returns>Cancel order response, or null if request fails</returns>
+        public OKXCancelOrderResponse CancelOrder(OKXCancelOrderRequest request)
+        {
+            try
+            {
+                var response = Post<OKXApiResponse<OKXCancelOrderResponse>>(
+                    "/trade/cancel-order",
+                    request,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess || response.Data == null || response.Data.Count == 0)
+                {
+                    Log.Error($"OKXRestApiClient.CancelOrder(): Failed to cancel order - code: {response?.Code}, msg: {response?.Message}");
+                    return null;
+                }
+
+                var cancelResponse = response.Data[0];
+
+                // Check if cancellation was successful (sCode = "0")
+                if (cancelResponse.StatusCode != "0")
+                {
+                    Log.Error($"OKXRestApiClient.CancelOrder(): Cancellation rejected - code: {cancelResponse.StatusCode}, msg: {cancelResponse.StatusMessage}");
+                    return null;
+                }
+
+                return cancelResponse;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.CancelOrder(): Exception: {ex.Message}");
+                return null;
+            }
+        }
     }
 }
