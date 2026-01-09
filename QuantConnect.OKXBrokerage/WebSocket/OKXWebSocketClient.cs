@@ -139,6 +139,7 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
                     // Connect
                     Log.Trace($"OKXWebSocketClient.Connect(): Connecting to {_websocketUrl}");
                     _webSocket.Initialize(_websocketUrl);
+                    _webSocket.Connect();
 
                     // Wait for connection
                     var timeout = DateTime.UtcNow.AddMilliseconds(ConnectionTimeoutMs);
@@ -368,7 +369,7 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
         private string Sign(string message, string secret)
         {
             var encoding = Encoding.UTF8;
-            var keyBytes = Convert.FromBase64String(secret);
+            var keyBytes = encoding.GetBytes(secret);
             var messageBytes = encoding.GetBytes(message);
 
             using (var hmac = new HMACSHA256(keyBytes))
@@ -390,16 +391,38 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
         {
             try
             {
-                var json = message.Data.ToString();
-
-                // Handle pong response
-                if (json == "pong")
+                // Extract message text
+                if (!(message.Data is WebSocketClientWrapper.TextMessage textMessage))
                 {
                     return;
                 }
 
-                // Parse message
-                var jObject = JObject.Parse(json);
+                var json = textMessage.Message;
+
+                // Handle plain text messages (ping/pong)
+                if (json == "pong" || json == "ping")
+                {
+                    return;
+                }
+
+                // Skip empty or whitespace messages
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    return;
+                }
+
+                // Try to parse as JSON
+                JObject jObject;
+                try
+                {
+                    jObject = JObject.Parse(json);
+                }
+                catch (JsonException)
+                {
+                    // Not JSON, log and ignore
+                    Log.Trace($"OKXWebSocketClient.OnMessage(): Received non-JSON message: {json.Substring(0, Math.Min(50, json.Length))}");
+                    return;
+                }
 
                 // Check for event responses (subscribe, login, error)
                 if (jObject["event"] != null)
