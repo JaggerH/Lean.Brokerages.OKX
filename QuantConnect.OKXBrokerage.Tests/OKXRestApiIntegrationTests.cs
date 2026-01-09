@@ -233,12 +233,12 @@ namespace QuantConnect.Brokerages.OKX.Tests
         }
 
         /// <summary>
-        /// Tests GetAccountPositions endpoint
+        /// Tests GetPositions endpoint
         /// </summary>
         [Test]
-        public void GetAccountPositions_ReturnsPositions()
+        public void GetPositions_ReturnsPositions()
         {
-            var positions = _client.GetAccountPositions();
+            var positions = _client.GetPositions();
 
             Assert.IsNotNull(positions, "Positions should not be null");
 
@@ -247,7 +247,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 var firstPosition = positions[0];
 
                 Console.WriteLine($"Found {positions.Count} position(s)");
-                Console.WriteLine($"First position: {firstPosition.InstrumentId}, Qty={firstPosition.Quantity}, AvgPx={firstPosition.AveragePrice}");
+                Console.WriteLine($"First position: {firstPosition.InstrumentId}, Qty={firstPosition.Position}, AvgPx={firstPosition.AveragePrice}");
 
                 // Verify position has required fields
                 Assert.IsNotEmpty(firstPosition.InstrumentType, "InstrumentType should not be empty");
@@ -260,12 +260,12 @@ namespace QuantConnect.Brokerages.OKX.Tests
         }
 
         /// <summary>
-        /// Tests GetAccountPositions with instrument filter
+        /// Tests GetPositions with instrument filter
         /// </summary>
         [Test]
-        public void GetAccountPositions_WithInstrumentType_ReturnsFilteredPositions()
+        public void GetPositions_WithInstrumentType_ReturnsFilteredPositions()
         {
-            var positions = _client.GetAccountPositions("SWAP");
+            var positions = _client.GetPositions("SWAP");
 
             Assert.IsNotNull(positions, "Positions should not be null");
 
