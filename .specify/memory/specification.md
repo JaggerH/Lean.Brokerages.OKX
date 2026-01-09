@@ -1327,6 +1327,439 @@ public enum OKXEnvironment
 
 ---
 
+## 15. 消息 Envelope 结构分析
+
+**文档参考：** RequestAndResponse (WS-REST).md (2026-01-09)
+
+### 15.1 统一的 Envelope 结构
+
+**关键发现：OKX v5 API 所有接口遵循统一的 Envelope 模式**
+
+#### REST API Envelope（100% 一致）
+
+```json
+{
+  "code": "0",
+  "msg": "",
+  "data": [...]
+}
+```
+
+**重要特性：**
+1. ✅ **所有 REST 端点使用相同结构**
+2. ✅ **`data` 永远是数组**（即使单个对象也包装在数组中）
+3. ✅ **`code="0"` 表示成功**
+4. ⚠️ **双层错误检查机制**（见 15.3）
+
+**适用范围：**
+- Place Order (`POST /api/v5/trade/order`)
+- Amend Order (`POST /api/v5/trade/amend-order`)
+- Cancel Order (`POST /api/v5/trade/cancel-order`)
+- Get Pending Orders (`GET /api/v5/trade/orders-pending`)
+- Get Balance (`GET /api/v5/account/balance`)
+- Get Positions (`GET /api/v5/account/positions`)
+
+---
+
+#### WebSocket Envelope（双格式）
+
+**控制消息（事件响应）：**
+```json
+{
+  "event": "subscribe" | "unsubscribe" | "error" | "login",
+  "arg": { "channel": "...", "instId": "..." },
+  "code": "0",
+  "msg": "",
+  "connId": "a4d3ae55"
+}
+```
+
+**数据推送：**
+```json
+{
+  "arg": { "channel": "...", "instId": "..." },
+  "data": [...],
+  "action": "snapshot" | "update"  // 仅 order book
+}
+```
+
+**重要特性：**
+1. ✅ **`event` 字段区分控制 vs 数据**
+2. ✅ **`data` 永远是数组**
+3. ✅ **所有 channel 使用相同结构**
+
+---
+
+### 15.2 数据格式总结
+
+| 端点/Channel | `data` 格式 | 包含对象数 | 备注 |
+|--------------|-------------|-----------|------|
+| **REST - Place Order** | Array | 1 | 单对象包装在数组中 |
+| **REST - Amend Order** | Array | 1 | 单对象包装在数组中 |
+| **REST - Cancel Order** | Array | 1 | 单对象包装在数组中 |
+| **REST - Get Pending Orders** | Array | 0-N | 多个订单 |
+| **REST - Get Balance** | Array | 1 | 单对象包装在数组中，但内部 `details` 也是数组 |
+| **REST - Get Positions** | Array | 0-N | 多个持仓 |
+| **WS - orders channel** | Array | 1-N | 批量订单更新 |
+| **WS - account channel** | Array | 1 | 单账户对象 |
+| **WS - positions channel** | Array | 1-N | 多个持仓更新 |
+| **WS - tickers channel** | Array | 1 | 单 ticker |
+| **WS - trades channel** | Array | 1-N | 批量成交记录 |
+| **WS - books5 channel** | Array | 1 | 单个订单簿快照 |
+
+**结论：**
+- ✅ **100% 的接口 `data` 字段都是数组**
+- ⚠️ **永远不要假设 `data` 是单对象**
+- ⚠️ **必须处理空数组情况** (`data: []`)
+
+---
+
+### 15.3 错误处理架构
+
+#### REST API 双层错误检查
+
+**问题：OKX 使用双层错误码机制**
+
+```json
+{
+  "code": "0",
+  "msg": "",
+  "data": [
+    {
+      "ordId": "",
+      "clOrdId": "b15",
+      "sCode": "51004",
+      "sMsg": "Insufficient balance"
+    }
+  ]
+}
+```
+
+**两层错误：**
+1. **Top-level 错误** (`code`, `msg`)
+   - `code ≠ "0"` → 请求被拒绝（参数错误、权限错误等）
+   - 整个请求失败
+
+2. **Individual-level 错误** (`sCode`, `sMsg`)
+   - `code = "0"` 但 `data[i].sCode ≠ "0"` → 请求接受但订单失败
+   - 订单被交易所拒绝（余额不足、价格超限等）
+
+**关键规则：**
+```csharp
+// ❌ 错误：只检查 code
+if (response.Code == "0")
+{
+    return true;  // BUG: 可能订单实际失败了
+}
+
+// ✅ 正确：检查两层
+if (response.Code == "0" && response.Data[0].SCode == "0")
+{
+    return true;  // 确认请求和订单都成功
+}
+```
+
+---
+
+#### WebSocket 错误格式
+
+```json
+{
+  "event": "error",
+  "code": "60012",
+  "msg": "Invalid request: {...}",
+  "connId": "a4d3ae55"
+}
+```
+
+**错误类型：**
+- 订阅失败 (`event: "subscribe"`, `code ≠ "0"`)
+- 登录失败 (`event: "login"`, `code ≠ "0"`)
+- 协议错误 (`event: "error"`)
+
+---
+
+### 15.4 Messaging.cs 重构 Plan
+
+**当前问题（OKXBaseBrokerage.Messaging.cs）：**
+1. ❌ 保留 Gate.io 消息处理框架
+2. ❌ 使用 Gate.io 的 channel 命名（如 `spot.orders`）
+3. ❌ 使用 JObject 手动解析（弱类型）
+4. ❌ 假设 `data` 可能是对象或数组
+
+**重构目标：**
+1. ✅ 用 OKX 消息类型替换 Gate 框架
+2. ✅ 使用强类型 Message 类（`OKXWebSocketDataMessage<T>`）
+3. ✅ 统一处理 `data` 数组格式
+4. ✅ 实现双层错误检查（REST）
+
+---
+
+### 15.5 重构分步计划
+
+#### Step 1: 定义强类型 WebSocket 消息类（已完成 ✅）
+
+文件：`Messages/OKXWebSocketMessages.cs`
+
+```csharp
+public class OKXWebSocketResponse
+{
+    [JsonProperty("event")]
+    public string Event { get; set; }  // "subscribe", "error", "login"
+
+    [JsonProperty("code")]
+    public string Code { get; set; }  // "0" = success
+
+    [JsonProperty("msg")]
+    public string Message { get; set; }
+
+    [JsonProperty("connId")]
+    public string ConnectionId { get; set; }
+
+    [JsonProperty("arg")]
+    public OKXWebSocketChannel Arg { get; set; }
+}
+
+public class OKXWebSocketDataMessage<T>
+{
+    [JsonProperty("arg")]
+    public OKXWebSocketChannel Arg { get; set; }
+
+    [JsonProperty("data")]
+    public List<T> Data { get; set; }  // 永远是数组
+
+    [JsonProperty("action")]
+    public string Action { get; set; }  // "snapshot" | "update"（仅 order book）
+}
+
+public class OKXWebSocketChannel
+{
+    [JsonProperty("channel")]
+    public string Channel { get; set; }
+
+    [JsonProperty("instId")]
+    public string InstrumentId { get; set; }
+
+    [JsonProperty("instType")]
+    public string InstrumentType { get; set; }
+}
+```
+
+---
+
+#### Step 2: 替换 Gate 消息处理逻辑
+
+**文件：** `Core/OKXBaseBrokerage.Messaging.cs`
+
+**当前（Gate.io）：**
+```csharp
+private void HandleOrderPlaceMessage(JObject data)
+{
+    var result = data?["result"];
+    var isFutures = ChannelPrefix == "futures";  // ❌ 使用 ChannelPrefix
+
+    if (isFutures)
+    {
+        var order = result.ToObject<FuturesOrder>();  // ❌ 弱类型
+    }
+    // ...
+}
+```
+
+**目标（OKX）：**
+```csharp
+private void HandleOrderMessage(OKXWebSocketDataMessage<OKXWebSocketOrder> message)
+{
+    if (message.Data == null || message.Data.Count == 0)
+        return;
+
+    foreach (var order in message.Data)  // ✅ 处理数组
+    {
+        // 使用 instId 判断类型（不依赖 ChannelPrefix）
+        var securityType = GetSecurityType(order.InstrumentId);
+
+        var orderEvent = new OrderEvent
+        {
+            OrderId = int.Parse(order.ClientOrderId),
+            Status = MapOrderState(order.State),
+            FillPrice = decimal.Parse(order.AveragePrice),
+            // ...
+        };
+
+        OnOrderEvent(orderEvent);
+    }
+}
+```
+
+---
+
+#### Step 3: 消息路由表
+
+**文件：** `Core/OKXBaseBrokerage.Messaging.cs`
+
+```csharp
+private void OnMessage(WebSocketMessage message)
+{
+    var jObject = JObject.Parse(message.Data);
+
+    // 1. 检查是否为控制消息
+    if (jObject["event"] != null)
+    {
+        HandleEventResponse(jObject.ToObject<OKXWebSocketResponse>());
+        return;
+    }
+
+    // 2. 数据推送 - 根据 channel 路由
+    var arg = jObject["arg"].ToObject<OKXWebSocketChannel>();
+
+    switch (arg.Channel)
+    {
+        case "orders":
+            var ordersMsg = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketOrder>>();
+            HandleOrderMessage(ordersMsg);
+            break;
+
+        case "account":
+            var accountMsg = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketAccount>>();
+            HandleAccountMessage(accountMsg);
+            break;
+
+        case "positions":
+            var positionsMsg = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketPosition>>();
+            HandlePositionMessage(positionsMsg);
+            break;
+
+        case "tickers":
+            var tickersMsg = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketTicker>>();
+            HandleTickerMessage(tickersMsg);
+            break;
+
+        case "trades":
+            var tradesMsg = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketTrade>>();
+            HandleTradeMessage(tradesMsg);
+            break;
+
+        case "books":
+        case "books5":
+            var booksMsg = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketOrderBook>>();
+            HandleOrderBookMessage(booksMsg);
+            break;
+
+        default:
+            Log.Warning($"Unknown channel: {arg.Channel}");
+            break;
+    }
+}
+```
+
+---
+
+#### Step 4: REST API 双层错误检查
+
+**文件：** `Core/OKXBaseBrokerage.Orders.cs`
+
+```csharp
+public override bool PlaceOrder(Order order)
+{
+    try
+    {
+        var request = ConvertToOKXOrder(order);
+        var response = RestApiClient.PlaceOrder(request);
+
+        // 第一层：检查顶层 code
+        if (response == null || response.Code != "0")
+        {
+            Log.Error($"Place order failed (top-level): {response?.Message}");
+            OnMessage(new BrokerageMessageEvent(
+                BrokerageMessageType.Error,
+                response?.Code ?? "-1",
+                response?.Message ?? "Unknown error"));
+            return false;
+        }
+
+        // 第二层：检查 data 数组
+        if (response.Data == null || response.Data.Count == 0)
+        {
+            Log.Error("Place order failed: Empty data array");
+            return false;
+        }
+
+        var orderResponse = response.Data[0];
+
+        // 第三层：检查 sCode
+        if (orderResponse.StatusCode != "0")
+        {
+            Log.Error($"Place order rejected: {orderResponse.StatusMessage}");
+            OnMessage(new BrokerageMessageEvent(
+                BrokerageMessageType.Warning,
+                orderResponse.StatusCode,
+                orderResponse.StatusMessage));
+            return false;
+        }
+
+        // 成功：触发 OrderIdChanged
+        OnOrderIdChanged(new BrokerageOrderIdChangedEvent
+        {
+            OrderId = order.Id,
+            BrokerId = new List<string> { orderResponse.OrderId }
+        });
+
+        return true;
+    }
+    catch (Exception ex)
+    {
+        Log.Error($"Place order exception: {ex.Message}");
+        return false;
+    }
+}
+```
+
+---
+
+### 15.6 重构检查清单
+
+**Phase A: Message Class 定义** ✅ (已完成)
+- [x] OKXWebSocketResponse
+- [x] OKXWebSocketDataMessage<T>
+- [x] OKXWebSocketChannel
+- [x] OKXWebSocketOrder
+- [x] OKXWebSocketAccount
+- [x] OKXWebSocketPosition
+- [x] OKXWebSocketTicker
+- [x] OKXWebSocketTrade
+- [x] OKXWebSocketOrderBook
+
+**Phase B: Messaging.cs 重构** (待完成)
+- [ ] 删除 Gate.io `HandleOrderPlaceMessage`
+- [ ] 删除 Gate.io `HandleOrderAmendMessage`
+- [ ] 删除 Gate.io `HandleOrderCancelMessage`
+- [ ] 删除 Gate.io `HandleTickersMessage`
+- [ ] 删除 Gate.io `HandleBookTickerMessage`
+- [ ] 添加 OKX `HandleOrderMessage`
+- [ ] 添加 OKX `HandleAccountMessage`
+- [ ] 添加 OKX `HandlePositionMessage`
+- [ ] 添加 OKX `HandleTickerMessage`
+- [ ] 添加 OKX `HandleTradeMessage`
+- [ ] 添加 OKX `HandleOrderBookMessage`
+- [ ] 修改 `OnMessage` 路由逻辑
+
+**Phase C: Orders.cs 重构** (待完成)
+- [ ] PlaceOrder 添加双层错误检查
+- [ ] CancelOrder 添加双层错误检查
+- [ ] AmendOrder/UpdateOrder 添加双层错误检查
+- [ ] 移除 ChannelPrefix 依赖
+- [ ] 使用 GetSecurityType(instId) 判断类型
+
+**Phase D: 测试验证** (待完成)
+- [ ] 单元测试：空 data 数组处理
+- [ ] 单元测试：Top-level 错误
+- [ ] 单元测试：Individual-level 错误（sCode）
+- [ ] 单元测试：成功路径（code=0, sCode=0）
+- [ ] 集成测试：WebSocket 消息路由
+- [ ] 集成测试：订单生命周期
+
+---
+
 ## 验证检查点
 
 规格文档完成后，必须确认：
@@ -1341,11 +1774,14 @@ public enum OKXEnvironment
 - [ ] 配置格式清晰
 - [ ] 测试用例覆盖所有功能
 - [ ] 特殊情况（账户模式、市场订单）已识别
+- [x] **消息 Envelope 结构分析完成（Section 15）**
+- [x] **双层错误检查机制定义**
+- [x] **`data` 数组格式统一处理**
 
 ---
 
-**下一步：** Phase 3 - 编写详细的实施计划（plan.md）
+**下一步：** 开始执行 Messaging.cs 重构（Phase B）
 
-**版本：** 1.0
+**版本：** 1.1
 **最后更新：** 2026-01-09
-**状态：** Draft ✅
+**状态：** In Progress (Phase 2 - Messaging Refactor)
