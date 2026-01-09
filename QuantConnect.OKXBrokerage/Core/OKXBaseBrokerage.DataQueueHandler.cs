@@ -307,6 +307,7 @@ namespace QuantConnect.Brokerages.OKX
             Initialize(
                 apiKey: job.BrokerageData["okx-api-key"],
                 apiSecret: job.BrokerageData["okx-api-secret"],
+                passphrase: job.BrokerageData["okx-api-passphrase"],
                 algorithm: null,  // DataQueueHandler mode, no algorithm
                 aggregator: aggregator,
                 job: job

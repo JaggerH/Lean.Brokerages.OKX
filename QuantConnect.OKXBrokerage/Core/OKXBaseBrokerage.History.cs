@@ -16,6 +16,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using QuantConnect.Brokerages.OKX.Converters;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Logging;
@@ -24,195 +25,151 @@ namespace QuantConnect.Brokerages.OKX
 {
     /// <summary>
     /// OKX Brokerage - Historical Data Implementation
-    /// Provides historical market data via REST API
     /// </summary>
     public abstract partial class OKXBaseBrokerage
     {
         /// <summary>
-        /// Gets historical market data for the specified request
+        /// Gets the history for the requested security
         /// </summary>
-        /// <param name="request">History request parameters</param>
-        /// <returns>Enumerable of base data (TradeBars) or null if not supported</returns>
+        /// <param name="request">The historical data request</param>
+        /// <returns>An enumerable of bars/ticks covering the span specified in the request</returns>
         public override IEnumerable<BaseData> GetHistory(HistoryRequest request)
         {
-            // Validate symbol is supported
-            if (!CanSubscribe(request.Symbol))
+            // Validate request
+            if (request == null)
             {
-                Log.Trace($"{GetType().Name}.GetHistory(): Cannot subscribe to symbol {request.Symbol}");
-                return null;
+                Log.Error($"{GetType().Name}.GetHistory(): Request cannot be null");
+                yield break;
             }
 
-            // Only support TradeBar for now
-            if (request.DataType != typeof(TradeBar))
+            if (request.Symbol == null || string.IsNullOrEmpty(request.Symbol.Value))
             {
-                Log.Trace($"{GetType().Name}.GetHistory(): Unsupported data type {request.DataType.Name}");
-                return null;
+                Log.Error($"{GetType().Name}.GetHistory(): Invalid symbol in request");
+                yield break;
             }
 
-            // Validate resolution is supported
-            var interval = OKXUtility.ConvertResolution(request.Resolution);
-            if (string.IsNullOrEmpty(interval))
+            Log.Trace($"{GetType().Name}.GetHistory(): Requesting {request.DataType.Name} history for {request.Symbol} " +
+                     $"from {request.StartTimeUtc:yyyy-MM-dd HH:mm:ss} to {request.EndTimeUtc:yyyy-MM-dd HH:mm:ss} " +
+                     $"at {request.Resolution} resolution");
+
+            // Convert symbol to OKX format
+            var instId = _symbolMapper.GetBrokerageSymbol(request.Symbol);
+
+            // Handle different data types
+            if (request.DataType == typeof(TradeBar) || request.DataType == typeof(QuoteBar))
             {
-                Log.Trace($"{GetType().Name}.GetHistory(): Unsupported resolution {request.Resolution}");
-                return null;
-            }
+                // Get candles (OHLCV data)
+                var bar = ConvertResolutionToBar(request.Resolution);
+                var startMs = new DateTimeOffset(request.StartTimeUtc).ToUnixTimeMilliseconds();
+                var endMs = new DateTimeOffset(request.EndTimeUtc).ToUnixTimeMilliseconds();
 
-            try
-            {
-                // Convert parameters
-                var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(request.Symbol);
-                var fromTimestamp = (long)Time.DateTimeToUnixTimeStamp(request.StartTimeUtc);
-                var toTimestamp = (long)Time.DateTimeToUnixTimeStamp(request.EndTimeUtc);
+                // Pagination: OKX returns max 100 candles per request
+                // Use 'before' parameter for historical data pagination
+                // 'before' means: get data older than this timestamp
+                long? before = endMs;
+                var candleCount = 0;
 
-                Log.Trace($"{GetType().Name}.GetHistory(): Fetching history for {brokerageSymbol} from {request.StartTimeUtc:yyyy-MM-dd HH:mm:ss} to {request.EndTimeUtc:yyyy-MM-dd HH:mm:ss} ({interval})");
-
-                // Fetch candlesticks with pagination
-                var allCandles = FetchCandlesticksWithPagination(brokerageSymbol, interval, fromTimestamp, toTimestamp);
-
-                if (allCandles == null || allCandles.Count == 0)
+                while (true)
                 {
-                    Log.Trace($"{GetType().Name}.GetHistory(): No candlestick data returned for {brokerageSymbol}");
-                    return Enumerable.Empty<BaseData>();
+                    var candles = RestApiClient.GetCandles(instId, bar, null, before, 100);
+
+                    if (candles == null || candles.Count == 0)
+                    {
+                        Log.Trace($"{GetType().Name}.GetHistory(): No more candles returned. Total fetched: {candleCount}");
+                        break;
+                    }
+
+                    // OKX returns candles in descending order (newest first)
+                    // We need to reverse them for chronological processing
+                    candles.Reverse();
+
+                    foreach (var candle in candles)
+                    {
+                        // Filter: only return candles within requested time range
+                        if (candle.Timestamp < startMs)
+                        {
+                            Log.Trace($"{GetType().Name}.GetHistory(): Reached start of requested range. Total candles: {candleCount}");
+                            yield break;
+                        }
+
+                        if (candle.Timestamp <= endMs)
+                        {
+                            yield return candle.ToTradeBar(request.Symbol);
+                            candleCount++;
+                        }
+                    }
+
+                    // Update pagination marker to the oldest candle timestamp
+                    // (after reversing, the last candle is the oldest)
+                    before = candles[candles.Count - 1].Timestamp;
+
+                    if (candles.Count < 100)
+                    {
+                        Log.Trace($"{GetType().Name}.GetHistory(): Received less than 100 candles. Total: {candleCount}");
+                        break;  // No more data available
+                    }
                 }
-
-                // Convert to LEAN TradeBars
-                var tradeBars = ConvertCandlesToTradeBars(allCandles, request.Symbol, request.Resolution);
-
-                Log.Trace($"{GetType().Name}.GetHistory(): Returned {tradeBars.Count()} bars for {brokerageSymbol}");
-
-                return tradeBars;
             }
-            catch (Exception ex)
+            else if (request.DataType == typeof(Tick) && request.TickType == TickType.Trade)
             {
-                Log.Error($"{GetType().Name}.GetHistory(): Error fetching history for {request.Symbol}: {ex.Message}");
-                return Enumerable.Empty<BaseData>();
+                // Get recent trade ticks
+                // Note: OKX /api/v5/market/trades endpoint only returns recent trades (max 500)
+                // Historical trade data beyond this is not available via REST API
+                Log.Trace($"{GetType().Name}.GetHistory(): Fetching recent trade ticks");
+
+                var trades = RestApiClient.GetTrades(instId, 500);
+
+                if (trades != null && trades.Count > 0)
+                {
+                    // Trades are returned in descending order (newest first)
+                    // Reverse for chronological order
+                    trades.Reverse();
+
+                    foreach (var trade in trades)
+                    {
+                        var time = DateTimeOffset.FromUnixTimeMilliseconds(trade.Timestamp).UtcDateTime;
+
+                        // Filter: only return trades within requested time range
+                        if (time >= request.StartTimeUtc && time <= request.EndTimeUtc)
+                        {
+                            yield return trade.ToTick(_symbolMapper, request.Symbol.SecurityType);
+                        }
+                    }
+                }
+            }
+            else if (request.DataType == typeof(Tick) && request.TickType == TickType.Quote)
+            {
+                // Quote ticks not supported for historical data
+                Log.Trace($"{GetType().Name}.GetHistory(): Quote ticks not supported for historical data");
+                yield break;
+            }
+            else
+            {
+                Log.Error($"{GetType().Name}.GetHistory(): Unsupported data type: {request.DataType.Name}");
+                yield break;
             }
         }
 
         /// <summary>
-        /// Fetches candlesticks with automatic pagination
-        /// OKX limits each request to 1000 candles maximum
+        /// Converts LEAN Resolution to OKX bar interval format
         /// </summary>
-        /// <param name="brokerageSymbol">Brokerage symbol (e.g., "BTC_USDT")</param>
-        /// <param name="interval">Interval string (e.g., "1m", "1h", "1d")</param>
-        /// <param name="fromTimestamp">Start timestamp (Unix seconds)</param>
-        /// <param name="toTimestamp">End timestamp (Unix seconds)</param>
-        /// <returns>List of candlestick arrays</returns>
-        private List<object[]> FetchCandlesticksWithPagination(
-            string brokerageSymbol,
-            string interval,
-            long fromTimestamp,
-            long toTimestamp)
+        /// <param name="resolution">The LEAN resolution</param>
+        /// <returns>OKX bar interval string (e.g., "1m", "1H", "1D")</returns>
+        private string ConvertResolutionToBar(Resolution resolution)
         {
-            var allCandles = new List<object[]>();
-            const int maxLimit = 1000;
-            var currentFrom = fromTimestamp;
-
-            while (currentFrom < toTimestamp)
+            switch (resolution)
             {
-                var candles = RestApiClient.GetCandlesticks(
-                    brokerageSymbol,
-                    interval,
-                    currentFrom,
-                    toTimestamp,
-                    maxLimit
-                );
-
-                if (candles == null || candles.Count == 0)
-                {
-                    break;
-                }
-
-                allCandles.AddRange(candles);
-
-                // Get timestamp of last candle
-                var lastTimestamp = Convert.ToInt64(candles.Last()[0]);
-
-                // If we got less than the limit, we've reached the end
-                if (candles.Count < maxLimit)
-                {
-                    break;
-                }
-
-                // If last timestamp is at or past our target, we're done
-                if (lastTimestamp >= toTimestamp)
-                {
-                    break;
-                }
-
-                // Move to next page (add 1 second to avoid duplicate)
-                currentFrom = lastTimestamp + 1;
-
-                // Safety check to prevent infinite loops
-                if (currentFrom == fromTimestamp)
-                {
-                    Log.Error($"{GetType().Name}.FetchCandlesticksWithPagination(): Infinite loop detected, breaking");
-                    break;
-                }
-
-                fromTimestamp = currentFrom;
+                case Resolution.Minute:
+                    return "1m";
+                case Resolution.Hour:
+                    return "1H";
+                case Resolution.Daily:
+                    return "1D";
+                case Resolution.Second:
+                    throw new NotSupportedException($"{GetType().Name}.GetHistory(): Second resolution is not supported by OKX API");
+                default:
+                    throw new ArgumentException($"{GetType().Name}.GetHistory(): Unsupported resolution: {resolution}");
             }
-
-            return allCandles;
-        }
-
-        /// <summary>
-        /// Converts OKX candlestick data to LEAN TradeBars
-        /// OKX candlestick format: [timestamp, volume, close, high, low, open]
-        /// (Futures has additional "amount" field at index 6)
-        /// </summary>
-        /// <param name="candles">Raw candlestick data from OKX</param>
-        /// <param name="symbol">LEAN symbol</param>
-        /// <param name="resolution">Resolution for the period</param>
-        /// <returns>List of TradeBars</returns>
-        private List<TradeBar> ConvertCandlesToTradeBars(
-            List<object[]> candles,
-            Symbol symbol,
-            Resolution resolution)
-        {
-            var tradeBars = new List<TradeBar>();
-            var period = resolution.ToTimeSpan();
-
-            foreach (var candle in candles)
-            {
-                if (candle == null || candle.Length < 6)
-                {
-                    Log.Error($"{GetType().Name}.ConvertCandlesToTradeBars(): Invalid candle data (length: {candle?.Length ?? 0})");
-                    continue;
-                }
-
-                try
-                {
-                    // Parse candlestick data
-                    // OKX format: [timestamp, volume, close, high, low, open]
-                    var timestamp = Convert.ToInt64(candle[0]);
-                    var volume = Convert.ToDecimal(candle[1]);
-                    var close = Convert.ToDecimal(candle[2]);
-                    var high = Convert.ToDecimal(candle[3]);
-                    var low = Convert.ToDecimal(candle[4]);
-                    var open = Convert.ToDecimal(candle[5]);
-
-                    // Convert timestamp to DateTime
-                    var time = Time.UnixTimeStampToDateTime(timestamp);
-
-                    tradeBars.Add(new TradeBar(
-                        time,
-                        symbol,
-                        open,
-                        high,
-                        low,
-                        close,
-                        volume,
-                        period
-                    ));
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"{GetType().Name}.ConvertCandlesToTradeBars(): Error converting candle: {ex.Message}");
-                }
-            }
-
-            return tradeBars;
         }
     }
 }

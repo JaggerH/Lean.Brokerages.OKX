@@ -115,28 +115,13 @@ namespace QuantConnect.Brokerages.OKX
         private Timer _reconnectTimer;
 
         // ========================================
-        // ABSTRACT PROPERTIES (must be overridden)
+        // PROTECTED FIELDS
         // ========================================
 
         /// <summary>
-        /// Returns the REST API client for this market type
+        /// REST API client for OKX API v5
         /// </summary>
-        protected abstract OKXBaseRestApiClient RestApiClient { get; }
-
-        /// <summary>
-        /// Returns the WebSocket URL for this market type
-        /// </summary>
-        protected abstract string WebSocketUrl { get; }
-
-        /// <summary>
-        /// Returns the channel prefix (e.g., "spot" or "futures")
-        /// </summary>
-        protected abstract string ChannelPrefix { get; }
-
-        /// <summary>
-        /// Returns the security type supported by this brokerage
-        /// </summary>
-        protected abstract SecurityType SupportedSecurityType { get; }
+        protected OKXRestApiClient RestApiClient { get; private set; }
 
         // ========================================
         // PUBLIC PROPERTIES
@@ -183,17 +168,18 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         /// <param name="apiKey">OKX API key</param>
         /// <param name="apiSecret">OKX API secret</param>
+        /// <param name="passphrase">OKX API passphrase</param>
         /// <param name="algorithm">Algorithm instance</param>
         /// <param name="aggregator">Data aggregator</param>
         /// <param name="job">Live job packet</param>
-        protected OKXBaseBrokerage(string apiKey, string apiSecret, IAlgorithm algorithm, IDataAggregator aggregator, LiveNodePacket job)
+        protected OKXBaseBrokerage(string apiKey, string apiSecret, string passphrase, IAlgorithm algorithm, IDataAggregator aggregator, LiveNodePacket job)
             : base("OKXBaseBrokerage")
         {
             _aggregator = aggregator;
             _symbolMapper = new OKXSymbolMapper(Market.OKX);
 
             // Call Initialize to complete setup
-            Initialize(apiKey, apiSecret, algorithm, aggregator, job);
+            Initialize(apiKey, apiSecret, passphrase, algorithm, aggregator, job);
         }
 
         /// <summary>
@@ -202,12 +188,14 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         /// <param name="apiKey">OKX API key</param>
         /// <param name="apiSecret">OKX API secret</param>
+        /// <param name="passphrase">OKX API passphrase</param>
         /// <param name="algorithm">Algorithm instance (can be null for DataQueueHandler mode)</param>
         /// <param name="aggregator">Data aggregator</param>
         /// <param name="job">Live job packet</param>
         protected virtual void Initialize(
             string apiKey,
             string apiSecret,
+            string passphrase,
             IAlgorithm algorithm,
             IDataAggregator aggregator,
             LiveNodePacket job)
@@ -217,8 +205,9 @@ namespace QuantConnect.Brokerages.OKX
                 return;
             }
 
-            // Get WebSocket URL from OKXEnvironment (uses abstract property for SecurityType)
-            var wssUrl = WebSocketUrl;
+            // Get WebSocket URL from OKXEnvironment
+            // OKX uses separate URLs for public (market data) and private (orders/account) channels
+            var wssUrl = OKXEnvironment.GetWebSocketPublicUrl();
 
             // 1. Call base initialization first (establishes WebSocket infrastructure, stores apiKey/apiSecret)
             // Use factory method for WebSocket to allow test injection
@@ -245,8 +234,8 @@ namespace QuantConnect.Brokerages.OKX
 
             SubscriptionManager = subscriptionManager;
 
-            // 4. Initialize REST client (subclass implements this via abstract RestApiClient property)
-            InitializeRestClient(apiKey, apiSecret);
+            // 4. Initialize REST API client
+            RestApiClient = new OKXRestApiClient(apiKey, apiSecret, passphrase);
 
             // 5. Initialize timers (created once, controlled via Start/Stop - Binance pattern)
             // Send heartbeat every 15 seconds
@@ -492,14 +481,8 @@ namespace QuantConnect.Brokerages.OKX
                     return;
                 }
 
-                var ping = new
-                {
-                    time = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    channel = $"{ChannelPrefix}.ping"
-                };
-
-                var message = JsonConvert.SerializeObject(ping);
-                WebSocket.Send(message);
+                // OKX WebSocket expects simple "ping" string (not JSON)
+                WebSocket.Send("ping");
             }
             catch (Exception ex)
             {
@@ -554,12 +537,6 @@ namespace QuantConnect.Brokerages.OKX
             {
                 var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
-                // Subscribe to order_book_update channel
-                var orderBookChannel = $"{ChannelPrefix}.order_book_update";
-                string[] orderBookParams = ChannelPrefix == "futures"
-                    ? new[] { "100ms", "100" }      // Futures needs depth parameter
-                    : new[] { "100ms" };            // Spot only needs interval
-
                 // Initialize order book context for this symbol (if not already exists)
                 var orderBookContext = _orderBookContexts.GetOrAdd(symbol, _ =>
                 {
@@ -568,28 +545,38 @@ namespace QuantConnect.Brokerages.OKX
                     return newContext;
                 });
 
-                var orderBookPayload = new object[] { brokerageSymbol }.Concat(orderBookParams).ToArray();
-                var orderBookRequest = new
+                // OKX v5 API subscription format: { "op": "subscribe", "args": [ { "channel": "...", "instId": "..." } ] }
+                // Subscribe to books5 channel (5-level orderbook depth)
+                var bookSubscribeMessage = new Messages.OKXWebSocketMessage
                 {
-                    time = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    channel = orderBookChannel,
-                    @event = "subscribe",
-                    payload = orderBookPayload
+                    Operation = "subscribe",
+                    Arguments = new List<object>
+                    {
+                        new Messages.OKXWebSocketChannel
+                        {
+                            Channel = "books5",
+                            InstrumentId = brokerageSymbol
+                        }
+                    }
                 };
-                webSocket.Send(JsonConvert.SerializeObject(orderBookRequest));
+                webSocket.Send(JsonConvert.SerializeObject(bookSubscribeMessage));
 
                 // Subscribe to trades channel
-                var tradesChannel = $"{ChannelPrefix}.trades";
-                var tradesRequest = new
+                var tradesSubscribeMessage = new Messages.OKXWebSocketMessage
                 {
-                    time = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    channel = tradesChannel,
-                    @event = "subscribe",
-                    payload = new[] { brokerageSymbol }
+                    Operation = "subscribe",
+                    Arguments = new List<object>
+                    {
+                        new Messages.OKXWebSocketChannel
+                        {
+                            Channel = "trades",
+                            InstrumentId = brokerageSymbol
+                        }
+                    }
                 };
-                webSocket.Send(JsonConvert.SerializeObject(tradesRequest));
+                webSocket.Send(JsonConvert.SerializeObject(tradesSubscribeMessage));
 
-                Log.Trace($"{GetType().Name}.Subscribe(): Subscribed {symbol} to {orderBookChannel} and {tradesChannel}");
+                Log.Trace($"{GetType().Name}.Subscribe(): Subscribed {symbol} to books5 and trades");
                 return true;
             }
             catch (Exception ex)
@@ -612,16 +599,21 @@ namespace QuantConnect.Brokerages.OKX
             {
                 var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
-                // Unsubscribe from order_book_update channel
-                var orderBookChannel = $"{ChannelPrefix}.order_book_update";
-                var orderBookUnsubscribeRequest = new
+                // OKX v5 API unsubscription format
+                // Unsubscribe from books5 channel
+                var bookUnsubscribeMessage = new Messages.OKXWebSocketMessage
                 {
-                    time = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    channel = orderBookChannel,
-                    @event = "unsubscribe",
-                    payload = new[] { brokerageSymbol }
+                    Operation = "unsubscribe",
+                    Arguments = new List<object>
+                    {
+                        new Messages.OKXWebSocketChannel
+                        {
+                            Channel = "books5",
+                            InstrumentId = brokerageSymbol
+                        }
+                    }
                 };
-                webSocket.Send(JsonConvert.SerializeObject(orderBookUnsubscribeRequest));
+                webSocket.Send(JsonConvert.SerializeObject(bookUnsubscribeMessage));
 
                 // Clean up order book contexts
                 if (_orderBookContexts.TryRemove(symbol, out var context))
@@ -650,17 +642,21 @@ namespace QuantConnect.Brokerages.OKX
                 _orderBooks.TryRemove(symbol, out _);
 
                 // Unsubscribe from trades channel
-                var tradesChannel = $"{ChannelPrefix}.trades";
-                var tradesUnsubscribeRequest = new
+                var tradesUnsubscribeMessage = new Messages.OKXWebSocketMessage
                 {
-                    time = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    channel = tradesChannel,
-                    @event = "unsubscribe",
-                    payload = new[] { brokerageSymbol }
+                    Operation = "unsubscribe",
+                    Arguments = new List<object>
+                    {
+                        new Messages.OKXWebSocketChannel
+                        {
+                            Channel = "trades",
+                            InstrumentId = brokerageSymbol
+                        }
+                    }
                 };
-                webSocket.Send(JsonConvert.SerializeObject(tradesUnsubscribeRequest));
+                webSocket.Send(JsonConvert.SerializeObject(tradesUnsubscribeMessage));
 
-                Log.Trace($"{GetType().Name}.Unsubscribe(): Unsubscribed {symbol} from {orderBookChannel} and {tradesChannel}");
+                Log.Trace($"{GetType().Name}.Unsubscribe(): Unsubscribed {symbol} from books5 and trades");
                 return true;
             }
             catch (Exception ex)
@@ -706,7 +702,8 @@ namespace QuantConnect.Brokerages.OKX
                 return false;
             }
 
-            return symbol.SecurityType == SupportedSecurityType;
+            // OKX supports both Crypto (spot) and CryptoFuture (perpetual swaps, futures)
+            return symbol.SecurityType == SecurityType.Crypto || symbol.SecurityType == SecurityType.CryptoFuture;
         }
 
         /// <summary>

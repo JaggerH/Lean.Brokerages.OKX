@@ -499,5 +499,30 @@ namespace QuantConnect.Brokerages.OKX
             // Close WebSocket to trigger framework's automatic reconnection
             WebSocket?.Close();
         }
+
+        /// <summary>
+        /// Determines the security type from OKX instrument ID
+        /// </summary>
+        /// <param name="instId">Instrument ID (e.g., "BTC-USDT", "BTC-USDT-SWAP", "BTC-USD-230630")</param>
+        /// <returns>SecurityType.Crypto for spot, SecurityType.CryptoFuture for futures/swaps</returns>
+        protected SecurityType GetSecurityType(string instId)
+        {
+            if (string.IsNullOrEmpty(instId))
+            {
+                return SecurityType.Crypto;
+            }
+
+            // OKX Instrument ID formats:
+            // Spot: BTC-USDT
+            // Perpetual Swap: BTC-USDT-SWAP
+            // Futures: BTC-USD-230630
+            if (instId.Contains("-SWAP") || instId.Contains("-FUTURES") ||
+                (instId.Split('-').Length == 3 && !instId.EndsWith("-SWAP")))
+            {
+                return SecurityType.CryptoFuture;
+            }
+
+            return SecurityType.Crypto;
+        }
     }
 }
