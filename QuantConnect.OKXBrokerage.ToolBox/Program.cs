@@ -65,11 +65,8 @@ namespace QuantConnect.OKXBrokerage.ToolBox
                     Log.Trace($"Program.Main(): Environment: {OKXEnvironment.GetEnvironmentName()}");
                     Log.Trace($"Program.Main(): API URL: {OKXEnvironment.RestApiUrl}");
 
-                    var downloader = new OKXExchangeInfoDownloader();
-                    var updater = new ExchangeInfoUpdater(downloader);
+                    ExchangeInfoDownloader(new OKXExchangeInfoDownloader());
 
-                    Log.Trace("Program.Main(): Starting OKX symbol properties update...");
-                    updater.Run();
                     Log.Trace("Program.Main(): Symbol properties update completed successfully");
                 }
                 catch (Exception ex)
@@ -82,6 +79,15 @@ namespace QuantConnect.OKXBrokerage.ToolBox
             {
                 PrintMessageAndExit(1, $"ERROR: Unrecognized --app value: {targetAppName}");
             }
+        }
+
+        /// <summary>
+        /// Endpoint for downloading exchange info
+        /// </summary>
+        public static void ExchangeInfoDownloader(IExchangeInfoDownloader exchangeInfoDownloader)
+        {
+            Log.Trace("Program.ExchangeInfoDownloader(): Starting OKX symbol properties update...");
+            new ExchangeInfoUpdater(exchangeInfoDownloader).Run();
         }
 
         /// <summary>

@@ -282,3 +282,6 @@ QuantConnect.OKXBrokerage.Tests/config.json
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# ToolBox generated symbol properties database
+symbol-properties/symbol-properties-database.csv

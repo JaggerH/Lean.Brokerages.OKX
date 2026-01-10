@@ -15,28 +15,21 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using Newtonsoft.Json;
 using QuantConnect.Brokerages.OKX;
 using QuantConnect.Brokerages.OKX.Messages;
-using QuantConnect.Logging;
 using QuantConnect.ToolBox;
 
 namespace QuantConnect.OKXBrokerage.ToolBox
 {
     /// <summary>
     /// OKX implementation of <see cref="IExchangeInfoDownloader"/>
-    /// Downloads symbol properties from OKX API and generates CSV entries
     /// </summary>
     public class OKXExchangeInfoDownloader : IExchangeInfoDownloader
     {
         private readonly string _apiBaseUrl;
-        private readonly Dictionary<string, string> _tokenizedStockBaseNames; // base -> base_name mapping for tokenized stocks
-        private readonly HashSet<string> _symbolFilter; // Optional symbol filter
-
-        private const string SpotApiPath = "/spot/currency_pairs";
-        private const string FuturesApiPath = "/futures/usdt/contracts";
+        private readonly HashSet<string> _symbolFilter;
 
         /// <summary>
         /// Market name
@@ -46,9 +39,6 @@ namespace QuantConnect.OKXBrokerage.ToolBox
         /// <summary>
         /// Creates a new instance
         /// </summary>
-        /// <remarks>
-        /// Always uses production API URL for symbol properties updates
-        /// </remarks>
         public OKXExchangeInfoDownloader() : this(null)
         {
         }
@@ -56,15 +46,11 @@ namespace QuantConnect.OKXBrokerage.ToolBox
         /// <summary>
         /// Creates a new instance with symbol filter
         /// </summary>
-        /// <param name="symbolFilter">Optional set of symbols to filter (e.g., {"BTC_USDT", "ETH_USDT"}).
+        /// <param name="symbolFilter">Optional set of symbols to filter (e.g., {"BTC-USDT", "ETH-USDT"}).
         /// If provided, only these symbols will be downloaded. If null, all symbols are downloaded.</param>
-        /// <remarks>
-        /// Always uses production API URL for symbol properties updates
-        /// </remarks>
         public OKXExchangeInfoDownloader(HashSet<string> symbolFilter)
         {
             _apiBaseUrl = OKXEnvironment.RestApiUrl;
-            _tokenizedStockBaseNames = new Dictionary<string, string>();
             _symbolFilter = symbolFilter;
         }
 
@@ -74,211 +60,116 @@ namespace QuantConnect.OKXBrokerage.ToolBox
         /// <returns>Enumerable of CSV-formatted symbol properties</returns>
         public IEnumerable<string> Get()
         {
-            Log.Trace("OKXExchangeInfoDownloader.Get(): Starting symbol properties download...");
+            // Download spot instruments
+            var spotData = Extensions.DownloadData($"{_apiBaseUrl}/api/v5/public/instruments?instType=SPOT");
+            var spotResponse = JsonConvert.DeserializeObject<InstrumentsResponse>(spotData);
 
-            // 1. Fetch spot data and build tokenized stock registry
-            var spotPairs = FetchSpotCurrencyPairs();
-            BuildTokenizedStockRegistry(spotPairs);
+            // Build tokenized stock registry for futures descriptions
+            var tokenizedStockNames = new Dictionary<string, string>();
+            foreach (var instrument in spotResponse.Data)
+            {
+                // Check if this might be a tokenized stock (you may need to adjust this logic)
+                if (!string.IsNullOrEmpty(instrument.BaseCurrency))
+                {
+                    // For now, store base currency name
+                    if (!tokenizedStockNames.ContainsKey(instrument.BaseCurrency))
+                    {
+                        tokenizedStockNames[instrument.BaseCurrency] = instrument.BaseCurrency;
+                    }
+                }
+            }
 
-            // Apply symbol filter to spot pairs if provided
+            // Apply symbol filter to spot instruments if provided
+            var filteredSpotInstruments = spotResponse.Data;
             if (_symbolFilter != null && _symbolFilter.Count > 0)
             {
-                var originalCount = spotPairs.Count;
-                spotPairs = spotPairs.Where(p => _symbolFilter.Contains(p.Id)).ToList();
-                Log.Trace($"OKXExchangeInfoDownloader.Get(): Filtered spot pairs from {originalCount} to {spotPairs.Count}");
+                filteredSpotInstruments = spotResponse.Data.Where(i => _symbolFilter.Contains(i.InstrumentId)).ToList();
             }
 
-            // 2. Generate spot CSV entries
-            var spotCount = 0;
-            foreach (var entry in GenerateSpotEntries(spotPairs))
+            // Generate spot CSV entries
+            foreach (var instrument in filteredSpotInstruments)
             {
-                spotCount++;
-                yield return entry;
+                if (string.IsNullOrEmpty(instrument.InstrumentId) ||
+                    string.IsNullOrEmpty(instrument.BaseCurrency) ||
+                    string.IsNullOrEmpty(instrument.QuoteCurrency))
+                {
+                    continue;
+                }
+
+                var symbol = $"{instrument.BaseCurrency}{instrument.QuoteCurrency}"; // BTCUSDT (no separator)
+                var description = instrument.BaseCurrency; // Use base currency as description
+                var tickSz = decimal.Parse(instrument.TickSize);
+                var lotSz = decimal.Parse(instrument.LotSize);
+                var minSz = decimal.Parse(instrument.MinSize);
+
+                yield return $"{Market.ToLowerInvariant()},{symbol},crypto,{description},{instrument.QuoteCurrency},1,{tickSz.NormalizeToStr()},{lotSz.NormalizeToStr()},{instrument.InstrumentId},{minSz.NormalizeToStr()},,";
             }
 
-            Log.Trace($"OKXExchangeInfoDownloader.Get(): Generated {spotCount} spot entries");
+            // Download swap/perpetual futures instruments
+            var futuresData = Extensions.DownloadData($"{_apiBaseUrl}/api/v5/public/instruments?instType=SWAP");
+            var futuresResponse = JsonConvert.DeserializeObject<InstrumentsResponse>(futuresData);
 
-            // 3. Fetch futures data and generate CSV entries
-            var futuresContracts = FetchFuturesContracts();
-
-            // Apply symbol filter to futures contracts if provided
+            // Apply symbol filter to futures if provided
+            var filteredFuturesInstruments = futuresResponse.Data;
             if (_symbolFilter != null && _symbolFilter.Count > 0)
             {
-                var originalCount = futuresContracts.Count;
-                futuresContracts = futuresContracts.Where(c => _symbolFilter.Contains(c.Name)).ToList();
-                Log.Trace($"OKXExchangeInfoDownloader.Get(): Filtered futures contracts from {originalCount} to {futuresContracts.Count}");
+                filteredFuturesInstruments = futuresResponse.Data.Where(i => _symbolFilter.Contains(i.InstrumentId)).ToList();
             }
 
-            var futuresCount = 0;
-            foreach (var entry in GenerateFuturesEntries(futuresContracts))
+            // Generate futures CSV entries
+            foreach (var instrument in filteredFuturesInstruments)
             {
-                futuresCount++;
-                yield return entry;
-            }
-
-            Log.Trace($"OKXExchangeInfoDownloader.Get(): Generated {futuresCount} futures entries");
-            Log.Trace($"OKXExchangeInfoDownloader.Get(): Total entries: {spotCount + futuresCount}");
-        }
-
-        /// <summary>
-        /// Fetches spot currency pairs from OKX API
-        /// </summary>
-        private List<SpotCurrencyPair> FetchSpotCurrencyPairs()
-        {
-            var endpoint = $"{_apiBaseUrl}{SpotApiPath}";
-            Log.Trace($"OKXExchangeInfoDownloader.FetchSpotCurrencyPairs(): Fetching from {endpoint}");
-
-            var json = Extensions.DownloadData(endpoint);
-            var pairs = JsonConvert.DeserializeObject<List<SpotCurrencyPair>>(json);
-
-            Log.Trace($"OKXExchangeInfoDownloader.FetchSpotCurrencyPairs(): Received {pairs.Count} spot pairs");
-            return pairs;
-        }
-
-        /// <summary>
-        /// Fetches futures contracts from OKX API
-        /// </summary>
-        private List<FuturesContract> FetchFuturesContracts()
-        {
-            var endpoint = $"{_apiBaseUrl}{FuturesApiPath}";
-            Log.Trace($"OKXExchangeInfoDownloader.FetchFuturesContracts(): Fetching from {endpoint}");
-
-            var json = Extensions.DownloadData(endpoint);
-            var contracts = JsonConvert.DeserializeObject<List<FuturesContract>>(json);
-
-            Log.Trace($"OKXExchangeInfoDownloader.FetchFuturesContracts(): Received {contracts.Count} futures contracts");
-            return contracts;
-        }
-
-        /// <summary>
-        /// Builds registry of tokenized stock base currencies (base -> base_name mapping)
-        /// Used to provide correct descriptions for tokenized stock futures
-        /// </summary>
-        private void BuildTokenizedStockRegistry(List<SpotCurrencyPair> spotPairs)
-        {
-            foreach (var pair in spotPairs)
-            {
-                if (!string.IsNullOrEmpty(pair.BaseName) &&
-                    (pair.BaseName.Contains("xStock") || pair.BaseName.Contains("Ondo Tokenized")))
+                if (string.IsNullOrEmpty(instrument.InstrumentId))
                 {
-                    _tokenizedStockBaseNames[pair.Base] = pair.BaseName;
-                }
-            }
-
-            if (_tokenizedStockBaseNames.Count > 0)
-            {
-                Log.Trace($"OKXExchangeInfoDownloader.BuildTokenizedStockRegistry(): Found {_tokenizedStockBaseNames.Count} tokenized stocks");
-            }
-        }
-
-        /// <summary>
-        /// Generates CSV entries for spot currency pairs
-        /// </summary>
-        private IEnumerable<string> GenerateSpotEntries(List<SpotCurrencyPair> pairs)
-        {
-            foreach (var pair in pairs)
-            {
-                // Skip if missing required fields
-                if (string.IsNullOrEmpty(pair.Id) || string.IsNullOrEmpty(pair.Base) || string.IsNullOrEmpty(pair.Quote))
-                {
-                    Log.Error($"OKXExchangeInfoDownloader.GenerateSpotEntries(): Skipping pair with missing fields: {pair.Id}");
                     continue;
                 }
 
-                // Calculate fields
-                var symbol = $"{pair.Base}{pair.Quote}"; // BTCUSDT (no underscore)
-                var minimumPriceVariation = CalculateMinimumPriceVariation(pair.Precision);
-
-                // Determine description - always use base_name for spot
-                // (Tokenized stocks will have names like "Apple xStock", regular cryptos like "Bitcoin")
-                var description = pair.BaseName;
-
-                // Format CSV: 12 fields
-                // market,symbol,type,description,quote_currency,contract_multiplier,
-                // minimum_price_variation,lot_size,market_ticker,minimum_order_size,
-                // price_magnifier,strike_multiplier
-                var csv = string.Join(",", new[]
+                // Only include linear contracts to avoid duplicates (e.g., BTC-USD-SWAP vs BTC-USD_UM-SWAP)
+                // Linear contracts are settled in quote currency and more commonly traded
+                if (!instrument.ContractType.Equals("linear", StringComparison.InvariantCultureIgnoreCase))
                 {
-                    "okx",                                                              // market
-                    symbol,                                                               // symbol
-                    "crypto",                                                             // type
-                    description,                                                          // description
-                    pair.Quote,                                                           // quote_currency
-                    "1",                                                                  // contract_multiplier
-                    minimumPriceVariation.ToString(CultureInfo.InvariantCulture),        // minimum_price_variation
-                    pair.MinBaseAmount.ToStringInvariant(),                              // lot_size
-                    pair.Id,                                                              // market_ticker (BTC_USDT)
-                    pair.MinQuoteAmount.ToStringInvariant(),                             // minimum_order_size
-                    "",                                                                   // price_magnifier (empty)
-                    ""                                                                    // strike_multiplier (empty)
-                });
-
-                yield return csv;
-            }
-        }
-
-        /// <summary>
-        /// Generates CSV entries for futures contracts
-        /// </summary>
-        private IEnumerable<string> GenerateFuturesEntries(List<FuturesContract> contracts)
-        {
-            foreach (var contract in contracts)
-            {
-                // Skip if missing required fields
-                if (string.IsNullOrEmpty(contract.Name))
-                {
-                    Log.Error($"OKXExchangeInfoDownloader.GenerateFuturesEntries(): Skipping contract with missing name");
                     continue;
                 }
 
-                // Extract base and quote from name (e.g., "BTC_USDT")
-                var parts = contract.Name.Split('_');
-                if (parts.Length != 2)
+                // For SWAP instruments, InstrumentId is like "BTC-USDT-SWAP" or "BTC-USD_UM-SWAP"
+                // We need to extract base and quote from the instrument ID
+                var parts = instrument.InstrumentId.Split('-');
+                if (parts.Length < 2)
                 {
-                    Log.Error($"OKXExchangeInfoDownloader.GenerateFuturesEntries(): Invalid contract name format: {contract.Name}");
                     continue;
                 }
 
-                var baseCurrency = parts[0];
-                var quoteCurrency = parts[1];
-                var symbol = $"{baseCurrency}{quoteCurrency}"; // BTCUSDT
+                var baseCcy = parts[0];
+                var quoteCcy = parts[1].Replace("_UM", ""); // Remove "_UM" suffix if present
+                var symbol = $"{baseCcy}{quoteCcy}"; // BTCUSDT or BTCUSD
 
-                // Determine description
-                // For tokenized stock futures, use spot's base_name (e.g., "Apple xStock Perpetual")
-                // For regular crypto futures, use base currency (e.g., "BTC Perpetual")
-                var description = _tokenizedStockBaseNames.TryGetValue(baseCurrency, out var baseName)
+                // Use tokenized stock name if available, otherwise use base currency
+                var description = tokenizedStockNames.TryGetValue(baseCcy, out var baseName)
                     ? $"{baseName} Perpetual"
-                    : $"{baseCurrency} Perpetual";
+                    : $"{baseCcy} Perpetual";
 
-                // Format CSV
-                var csv = string.Join(",", new[]
-                {
-                    "okx",                                                              // market
-                    symbol,                                                               // symbol
-                    "cryptofuture",                                                       // type
-                    description,                                                          // description
-                    quoteCurrency,                                                        // quote_currency
-                    contract.QuantoMultiplier.ToStringInvariant(),                       // contract_multiplier
-                    contract.OrderPriceRound.ToStringInvariant(),                        // minimum_price_variation
-                    contract.OrderSizeMin.ToString(CultureInfo.InvariantCulture),        // lot_size
-                    contract.Name,                                                        // market_ticker (BTC_USDT)
-                    "",                                                                   // minimum_order_size (empty)
-                    "",                                                                   // price_magnifier (empty)
-                    ""                                                                    // strike_multiplier (empty)
-                });
+                // Contract multiplier: use ctMult if available, otherwise default to 1
+                var contractMultiplier = string.IsNullOrEmpty(instrument.ContractMultiplier) ? 1m : decimal.Parse(instrument.ContractMultiplier);
+                var tickSz = decimal.Parse(instrument.TickSize);
+                var lotSz = decimal.Parse(instrument.LotSize);
 
-                yield return csv;
+                yield return $"{Market.ToLowerInvariant()},{symbol},cryptofuture,{description},{quoteCcy},{contractMultiplier.NormalizeToStr()},{tickSz.NormalizeToStr()},{lotSz.NormalizeToStr()},{instrument.InstrumentId},,,";
             }
         }
 
         /// <summary>
-        /// Calculates minimum price variation from precision
+        /// OKX API response wrapper for instruments
         /// </summary>
-        private decimal CalculateMinimumPriceVariation(int precision)
+        private class InstrumentsResponse
         {
-            // precision = 2 → MPV = 0.01
-            // precision = 4 → MPV = 0.0001
-            return (decimal)Math.Pow(10, -precision);
+            [JsonProperty("code")]
+            public string Code { get; set; }
+
+            [JsonProperty("data")]
+            public List<Instrument> Data { get; set; }
+
+            [JsonProperty("msg")]
+            public string Message { get; set; }
         }
     }
 }
