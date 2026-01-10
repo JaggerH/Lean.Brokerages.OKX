@@ -69,16 +69,9 @@ namespace QuantConnect.Brokerages.OKX
                 throw new ArgumentException("Invalid symbol");
             }
 
-            try
-            {
-                // First try the base mapper (CSV database)
-                return _baseMapper.GetBrokerageSymbol(symbol);
-            }
-            catch (ArgumentException)
-            {
-                // Fallback: Format based on security type
-                return FormatOKXSymbol(symbol);
-            }
+            // Use CSV database exclusively - no fallback
+            // All symbols must be explicitly mapped in symbol-properties-database.csv
+            return _baseMapper.GetBrokerageSymbol(symbol);
         }
 
         /// <summary>
@@ -104,16 +97,9 @@ namespace QuantConnect.Brokerages.OKX
                 throw new ArgumentException("Invalid brokerage symbol");
             }
 
-            try
-            {
-                // First try the base mapper (CSV database)
-                return _baseMapper.GetLeanSymbol(brokerageSymbol, securityType, market, expirationDate, strike, optionRight);
-            }
-            catch (ArgumentException)
-            {
-                // Fallback: Parse OKX symbol format
-                return ParseOKXSymbol(brokerageSymbol, securityType, market);
-            }
+            // Use CSV database exclusively - no fallback
+            return _baseMapper.GetLeanSymbol(brokerageSymbol, securityType, market,
+                expirationDate, strike, optionRight);
         }
 
         /// <summary>
@@ -179,159 +165,6 @@ namespace QuantConnect.Brokerages.OKX
             {
                 return false;
             }
-        }
-
-        /// <summary>
-        /// Formats a LEAN Symbol into OKX v5 API format
-        /// </summary>
-        /// <param name="symbol">LEAN Symbol</param>
-        /// <returns>OKX symbol string</returns>
-        private string FormatOKXSymbol(Symbol symbol)
-        {
-            switch (symbol.SecurityType)
-            {
-                case SecurityType.Crypto:
-                    return FormatSpotSymbol(symbol);
-
-                case SecurityType.CryptoFuture:
-                case SecurityType.Future:  // Symbol.CreateFuture() uses SecurityType.Future
-                    return FormatFuturesSymbol(symbol);
-
-                default:
-                    throw new NotSupportedException($"OKX does not support security type: {symbol.SecurityType}");
-            }
-        }
-
-        /// <summary>
-        /// Formats a spot symbol: BTCUSDT → BTC-USDT
-        /// </summary>
-        private string FormatSpotSymbol(Symbol symbol)
-        {
-            // Extract base and quote currency from symbol value
-            // Common quote currencies: USDT, USDC, USD, BTC, ETH
-            var symbolValue = symbol.Value.ToUpperInvariant();
-            var quoteCurrencies = new[] { "USDT", "USDC", "USD", "BTC", "ETH" };
-
-            foreach (var quote in quoteCurrencies)
-            {
-                if (symbolValue.EndsWith(quote))
-                {
-                    var baseCurrency = symbolValue.Substring(0, symbolValue.Length - quote.Length);
-                    if (!string.IsNullOrEmpty(baseCurrency))
-                    {
-                        return $"{baseCurrency}-{quote}";
-                    }
-                }
-            }
-
-            throw new ArgumentException($"Cannot parse spot symbol: {symbol.Value}. Unable to identify base/quote currency.");
-        }
-
-        /// <summary>
-        /// Formats a futures symbol based on expiration
-        /// Perpetual: /BTCUSDT → BTC-USDT-SWAP
-        /// Delivery: BTCUSDT28H25 (expiry: 2025-03-28) → BTC-USDT-250328
-        /// </summary>
-        private string FormatFuturesSymbol(Symbol symbol)
-        {
-            // LEAN's Symbol.CreateFuture() generates symbols with special formatting:
-            // - Perpetual (DefaultDate): /BTCUSDT (slash prefix)
-            // - Delivery futures: BTCUSDT28H25 (includes expiry code suffix)
-            // We need to extract just the base ticker part
-
-            var symbolValue = symbol.Value.ToUpperInvariant();
-
-            // Remove leading slash for perpetual contracts
-            if (symbolValue.StartsWith("/"))
-            {
-                symbolValue = symbolValue.Substring(1);
-            }
-
-            // Remove LEAN's expiry suffix (e.g., "28H25" from "BTCUSDT28H25")
-            // The suffix format is typically 2-5 characters at the end
-            // We look for common quote currencies to find where the base ticker ends
-            var quoteCurrencies = new[] { "USDT", "USDC", "USD", "BTC", "ETH" };
-
-            string baseCurrency = null;
-            string quoteCurrency = null;
-
-            foreach (var quote in quoteCurrencies)
-            {
-                // Check if symbol contains this quote currency
-                var quoteIndex = symbolValue.IndexOf(quote);
-                if (quoteIndex > 0)
-                {
-                    baseCurrency = symbolValue.Substring(0, quoteIndex);
-                    quoteCurrency = quote;
-                    break;
-                }
-            }
-
-            if (string.IsNullOrEmpty(baseCurrency) || string.IsNullOrEmpty(quoteCurrency))
-            {
-                throw new ArgumentException($"Cannot parse futures symbol: {symbol.Value}. Unable to identify base/quote currency.");
-            }
-
-            // Check if perpetual (no expiration date)
-            if (symbol.ID.Date == SecurityIdentifier.DefaultDate)
-            {
-                return $"{baseCurrency}-{quoteCurrency}-SWAP";
-            }
-
-            // Delivery futures: format expiry as YYMMDD
-            var expiryDate = symbol.ID.Date;
-            var expiryString = expiryDate.ToString("yyMMdd", CultureInfo.InvariantCulture);
-
-            return $"{baseCurrency}-{quoteCurrency}-{expiryString}";
-        }
-
-        /// <summary>
-        /// Parses an OKX symbol into a LEAN Symbol
-        /// Supports: BTC-USDT, BTC-USDT-SWAP, BTC-USDT-250328
-        /// </summary>
-        private Symbol ParseOKXSymbol(string brokerageSymbol, SecurityType securityType, string market)
-        {
-            var parts = brokerageSymbol.Split('-');
-
-            if (parts.Length < 2)
-            {
-                throw new ArgumentException($"Invalid OKX symbol format: {brokerageSymbol}. Expected format: BASE-QUOTE or BASE-QUOTE-SWAP or BASE-QUOTE-YYMMDD");
-            }
-
-            var baseCurrency = parts[0];
-            var quoteCurrency = parts[1];
-            var leanSymbolValue = $"{baseCurrency}{quoteCurrency}";
-
-            if (parts.Length == 2)
-            {
-                // Spot: BTC-USDT
-                if (securityType != SecurityType.Crypto)
-                {
-                    throw new ArgumentException($"Symbol {brokerageSymbol} appears to be spot, but SecurityType is {securityType}");
-                }
-
-                return Symbol.Create(leanSymbolValue, SecurityType.Crypto, market);
-            }
-            else if (parts.Length == 3)
-            {
-                if (parts[2] == "SWAP")
-                {
-                    // Perpetual swap: BTC-USDT-SWAP
-                    return Symbol.CreateFuture(leanSymbolValue, market, SecurityIdentifier.DefaultDate);
-                }
-                else
-                {
-                    // Delivery futures: BTC-USDT-250328
-                    if (!DateTime.TryParseExact(parts[2], "yyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var expiryDate))
-                    {
-                        throw new ArgumentException($"Invalid OKX futures expiry format: {parts[2]}. Expected YYMMDD.");
-                    }
-
-                    return Symbol.CreateFuture(leanSymbolValue, market, expiryDate);
-                }
-            }
-
-            throw new ArgumentException($"Invalid OKX symbol format: {brokerageSymbol}");
         }
     }
 }

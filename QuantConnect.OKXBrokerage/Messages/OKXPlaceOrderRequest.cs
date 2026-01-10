@@ -70,6 +70,14 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// </summary>
         [JsonProperty("tag", NullValueHandling = NullValueHandling.Ignore)]
         public string Tag { get; set; }
+
+        /// <summary>
+        /// Target currency for order size (base_ccy or quote_ccy)
+        /// Required for market orders to specify size in base currency
+        /// Always use base currency for all market orders for consistency
+        /// </summary>
+        [JsonProperty("tgtCcy", NullValueHandling = NullValueHandling.Ignore)]
+        public string TargetCurrency { get; set; }
     }
 
     /// <summary>

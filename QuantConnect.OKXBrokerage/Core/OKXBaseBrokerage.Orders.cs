@@ -106,7 +106,14 @@ namespace QuantConnect.Brokerages.OKX
                     Size = Math.Abs(order.Quantity).ToStringInvariant(),
                     Price = price,
                     ClientOrderId = order.Id.ToStringInvariant(),
-                    Tag = "LEAN"
+                    Tag = "LEAN",
+
+                    // For ALL market orders, always use base currency (e.g., BTC)
+                    // This is consistent and avoids the confusing Gate/OKX pattern where
+                    // market sell would use quote currency - that's a terrible design
+                    TargetCurrency = (ordType == "market")
+                        ? GetBaseCurrency(instId)
+                        : null
                 };
 
                 // Place order via REST API
@@ -159,6 +166,17 @@ namespace QuantConnect.Brokerages.OKX
 
                 return true;  // Binance pattern: return true even on exception
             }
+        }
+
+        /// <summary>
+        /// Extracts base currency from OKX instrument ID
+        /// Examples: BTC-USDT → BTC, BTC-USDT-SWAP → BTC, ETH-BTC → ETH
+        /// </summary>
+        /// <param name="instId">OKX instrument ID</param>
+        /// <returns>Base currency code</returns>
+        private string GetBaseCurrency(string instId)
+        {
+            return instId.Split('-')[0];
         }
 
         /// <summary>

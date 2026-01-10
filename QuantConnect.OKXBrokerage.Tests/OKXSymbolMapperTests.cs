@@ -152,9 +152,8 @@ namespace QuantConnect.Brokerages.OKX.Tests
         }
 
         /// <summary>
-        /// Tests OKX → LEAN conversion: BTC-USDT-SWAP → /BTCUSDT (Future, perpetual)
-        /// Note: LEAN prefixes perpetual futures with "/" in the symbol value
-        /// Note: Symbol.CreateFuture() uses SecurityType.Future, not CryptoFuture
+        /// Tests OKX → LEAN conversion: BTC-USDT-SWAP → BTCUSDT (CryptoFuture, perpetual)
+        /// CSV database defines perpetual swaps as CryptoFuture with BTCUSDT value (no slash prefix)
         /// </summary>
         [Test]
         public void GetLeanSymbol_PerpetualSwap_BTCUSDT()
@@ -163,7 +162,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             var symbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.CryptoFuture, Market.OKX);
 
             Assert.IsTrue(symbol.Value.Contains("BTCUSDT"), $"Symbol value should contain BTCUSDT, got: {symbol.Value}");
-            Assert.AreEqual(SecurityType.Future, symbol.SecurityType);
+            Assert.AreEqual(SecurityType.CryptoFuture, symbol.SecurityType);
             Assert.AreEqual(SecurityIdentifier.DefaultDate, symbol.ID.Date, "Perpetual swap should have DefaultDate");
         }
 
@@ -217,17 +216,21 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
         /// <summary>
         /// Tests round-trip conversion for perpetual swap symbols
+        /// CSV database defines perpetual swaps as CryptoFuture, so we start from GetLeanSymbol
+        /// to ensure we use the actual CSV database representation
         /// </summary>
         [Test]
         public void RoundTrip_PerpetualSwap_BTCUSDT()
         {
-            var originalSymbol = Symbol.CreateFuture("BTCUSDT", Market.OKX, SecurityIdentifier.DefaultDate);
+            // Start from OKX symbol to get the CSV database representation
+            var originalSymbol = _mapper.GetLeanSymbol("BTC-USDT-SWAP", SecurityType.CryptoFuture, Market.OKX);
             var brokerageSymbol = _mapper.GetBrokerageSymbol(originalSymbol);
             var convertedSymbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.CryptoFuture, Market.OKX);
 
             Assert.AreEqual(originalSymbol.Value, convertedSymbol.Value);
             Assert.AreEqual(originalSymbol.SecurityType, convertedSymbol.SecurityType);
             Assert.AreEqual(originalSymbol.ID.Date, convertedSymbol.ID.Date);
+            Assert.AreEqual("BTC-USDT-SWAP", brokerageSymbol);
         }
 
         /// <summary>
@@ -306,6 +309,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
         /// <summary>
         /// Tests that unsupported security type throws exception
+        /// After refactoring: CSV database will throw ArgumentException for symbols not in database
         /// </summary>
         [Test]
         public void GetBrokerageSymbol_UnsupportedSecurityType_ThrowsException()
@@ -313,7 +317,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             // Create a Forex symbol (unsupported by OKX)
             var symbol = Symbol.Create("EURUSD", SecurityType.Forex, Market.FXCM);
 
-            Assert.Throws<NotSupportedException>(() => _mapper.GetBrokerageSymbol(symbol));
+            Assert.Throws<ArgumentException>(() => _mapper.GetBrokerageSymbol(symbol));
         }
 
         #endregion
