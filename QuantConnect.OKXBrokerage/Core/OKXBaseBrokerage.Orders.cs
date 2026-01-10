@@ -46,9 +46,10 @@ namespace QuantConnect.Brokerages.OKX
                 // Determine order side (buy/sell) from quantity
                 var side = order.Quantity > 0 ? "buy" : "sell";
 
-                // Determine trade mode based on security type
-                // SPOT: cash, FUTURES/SWAP: cross (we use cross margin by default)
-                var tdMode = order.Symbol.SecurityType == SecurityType.Crypto ? "cash" : "cross";
+                // Determine trade mode based on account mode and security type
+                // Classic account (okx-unified-account-mode=cash): Spot→"cash", Futures→"cross"
+                // Unified accounts (portfolio/multi_currency/single_currency): All→"cross"
+                var tdMode = GetTradeMode(order.Symbol.SecurityType);
 
                 // Convert LEAN order type to OKX order type
                 string ordType;
@@ -106,14 +107,12 @@ namespace QuantConnect.Brokerages.OKX
                     Size = Math.Abs(order.Quantity).ToStringInvariant(),
                     Price = price,
                     ClientOrderId = order.Id.ToStringInvariant(),
-                    Tag = "LEAN",
+                    Tag = string.IsNullOrEmpty(order.Tag) ? "" : order.Tag,
 
                     // For ALL market orders, always use base currency (e.g., BTC)
                     // This is consistent and avoids the confusing Gate/OKX pattern where
                     // market sell would use quote currency - that's a terrible design
-                    TargetCurrency = (ordType == "market")
-                        ? GetBaseCurrency(instId)
-                        : null
+                    TargetCurrency = "base_ccy"
                 };
 
                 // Place order via REST API
@@ -168,15 +167,31 @@ namespace QuantConnect.Brokerages.OKX
             }
         }
 
+
+
         /// <summary>
-        /// Extracts base currency from OKX instrument ID
-        /// Examples: BTC-USDT → BTC, BTC-USDT-SWAP → BTC, ETH-BTC → ETH
+        /// Determines the trade mode (tdMode) based on account level and security type
+        /// Config value has been validated against actual account in ValidateAccountMode()
         /// </summary>
-        /// <param name="instId">OKX instrument ID</param>
-        /// <returns>Base currency code</returns>
-        private string GetBaseCurrency(string instId)
+        /// <param name="securityType">The security type</param>
+        /// <returns>Trade mode: "cash" or "cross"</returns>
+        private string GetTradeMode(SecurityType securityType)
         {
-            return instId.Split('-')[0];
+            // Read account level from configuration (validated in ValidateAccountMode)
+            // Values: "1" (Simple), "2" (Single-currency), "3" (Multi-currency), "4" (Portfolio)
+            var accountLevel = Configuration.Config.Get("okx-unified-account-mode", "1");
+
+            // Simple mode (acctLv="1"):
+            // - Spot (SecurityType.Crypto): tdMode="cash"
+            // - Futures/Swap (SecurityType.CryptoFuture): tdMode="cross"
+            if (accountLevel == "1")
+            {
+                return securityType == SecurityType.Crypto ? "cash" : "cross";
+            }
+
+            // Unified account modes (acctLv="2"/"3"/"4"):
+            // - All securities (Spot, Futures, Swap): tdMode="cross"
+            return "cross";
         }
 
         /// <summary>

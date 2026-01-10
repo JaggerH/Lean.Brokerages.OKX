@@ -138,5 +138,56 @@ namespace QuantConnect.Brokerages.OKX
             // Unsubscribe from private channels
             Log.Trace("OKXBrokerage.UnsubscribePrivateChannels(): Unsubscribed from private channels");
         }
+
+        /// <summary>
+        /// Validates account configuration
+        /// Ensures position mode is net_mode (one-way) and logs account level
+        /// Throws exception if validation fails
+        /// </summary>
+        protected override void ValidateAccountMode()
+        {
+            Log.Trace("OKXBrokerage.ValidateAccountMode(): Validating account configuration");
+
+            try
+            {
+                var config = RestApiClient.GetAccountConfiguration();
+
+                if (config == null)
+                {
+                    var errorMessage = "Failed to retrieve account configuration from OKX. Please verify API credentials and permissions.";
+                    Log.Error($"OKXBrokerage.ValidateAccountMode(): {errorMessage}");
+                    throw new Exception(errorMessage);
+                }
+
+                // Map account level to human-readable description
+                var accountLevelDescription = config.AccountLevel switch
+                {
+                    "1" => "Simple (Spot trading only)",
+                    "2" => "Single-currency margin",
+                    "3" => "Multi-currency margin",
+                    "4" => "Portfolio margin",
+                    _ => $"Unknown (Level: {config.AccountLevel})"
+                };
+
+                Log.Trace($"OKXBrokerage.ValidateAccountMode(): Account Level: {accountLevelDescription}");
+
+                // Validate position mode - must be net_mode (one-way)
+                if (config.PositionMode != "net_mode")
+                {
+                    var errorMessage = $"Position mode mismatch: current='{config.PositionMode}', required='net_mode'. " +
+                                     $"Please change your OKX account position mode to 'One-way Mode' (net_mode) in your account settings. " +
+                                     $"Go to OKX -> Settings -> Trading Preferences -> Position Mode -> Select 'One-way Mode'.";
+                    Log.Error($"OKXBrokerage.ValidateAccountMode(): {errorMessage}");
+                    throw new Exception(errorMessage);
+                }
+
+                Log.Trace($"OKXBrokerage.ValidateAccountMode(): Position mode validated successfully (net_mode)");
+            }
+            catch (Exception ex) when (!(ex.Message.Contains("Position mode mismatch") || ex.Message.Contains("Failed to retrieve account configuration")))
+            {
+                // Log other errors but don't block connection (API might be temporarily unavailable)
+                Log.Error($"OKXBrokerage.ValidateAccountMode(): Warning - failed to validate account configuration: {ex.Message}");
+            }
+        }
     }
 }

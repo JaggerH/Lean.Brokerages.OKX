@@ -1,6 +1,8 @@
 {
   "data-folder": "../../../../Lean/Data/",
-  "gate-api-secret": "YOUR_API_SECRET",
-  "gate-api-key": "YOUR_API_KEY",
-  "gate-environment": "testnet"
+  "okx-api-key": "YOUR_API_SECRET",
+  "okx-api-secret": "YOUR_API_KEY",
+  "okx-passphrase": "YOUR_PASSPHRASE",
+  "okx-environment": "testnet",
+  "okx-unified-account-mode": "4"
 }

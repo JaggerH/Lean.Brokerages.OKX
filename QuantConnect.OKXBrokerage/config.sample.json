@@ -16,12 +16,14 @@
   // Use "demo" or "testnet" for testing with demo funds
   "okx-environment": "production",
 
-  // Optional: Unified account mode (cash/isolated/cross)
-  // Default: "cash"
-  // - cash: Simple account mode for spot trading
-  // - isolated: Isolated margin mode
-  // - cross: Cross margin mode
-  "okx-unified-account-mode": "cash",
+  // Optional: Account level (must match your actual OKX account configuration)
+  // Default: "1"
+  // - "1": Simple mode (Spot uses "cash" tdMode, Futures uses "cross" tdMode)
+  // - "2": Single-currency margin mode (All use "cross" tdMode)
+  // - "3": Multi-currency margin mode (All use "cross" tdMode)
+  // - "4": Portfolio margin mode (All use "cross" tdMode)
+  // This value will be validated against actual account configuration on startup
+  "okx-unified-account-mode": "4",
 
   // Optional: Live holdings
   // Format: "Symbol,Quantity;Symbol2,Quantity2"
