@@ -97,6 +97,10 @@ namespace QuantConnect.Brokerages.OKX
                         return true;  // Binance pattern: always return true
                 }
 
+                // IMPORTANT: Add order to cache BEFORE placing via REST API
+                // This prevents race condition where WebSocket update arrives before Submitted event
+                CachedOrderIDs.TryAdd(order.Id, order);
+
                 // Create place order request
                 var request = new Messages.OKXPlaceOrderRequest
                 {

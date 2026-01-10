@@ -338,10 +338,40 @@ namespace QuantConnect.Brokerages.OKX.Messages
         public string Size { get; set; }
 
         /// <summary>
-        /// Filled size
+        /// Accumulated filled size (total filled amount)
         /// </summary>
         [JsonProperty("accFillSz")]
         public string FilledSize { get; set; }
+
+        /// <summary>
+        /// Last fill size (most recent trade's fill amount)
+        /// </summary>
+        [JsonProperty("fillSz")]
+        public string LastFillSize { get; set; }
+
+        /// <summary>
+        /// Last fill price (most recent trade's fill price)
+        /// </summary>
+        [JsonProperty("fillPx")]
+        public string LastFillPrice { get; set; }
+
+        /// <summary>
+        /// Last fill time (Unix timestamp in milliseconds)
+        /// </summary>
+        [JsonProperty("fillTime")]
+        public string LastFillTime { get; set; }
+
+        /// <summary>
+        /// Last fill fee
+        /// </summary>
+        [JsonProperty("fillFee")]
+        public string LastFillFee { get; set; }
+
+        /// <summary>
+        /// Last fill fee currency
+        /// </summary>
+        [JsonProperty("fillFeeCcy")]
+        public string LastFillFeeCurrency { get; set; }
 
         /// <summary>
         /// Average filled price

@@ -14,15 +14,13 @@
 */
 
 using System;
-using System.Collections.Generic;
 using System.Globalization;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using QuantConnect.Brokerages.OKX.Converters;
 using QuantConnect.Brokerages.OKX.Messages;
 using QuantConnect.Data.Market;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
-using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 
 namespace QuantConnect.Brokerages.OKX
@@ -126,6 +124,9 @@ namespace QuantConnect.Brokerages.OKX
         {
             var response = jObject.ToObject<OKXWebSocketResponse>();
 
+            // Log all event messages for debugging
+            Log.Trace($"{GetType().Name}.HandleEventMessage(): Received event '{response.Event}', Code: '{response.Code ?? "null"}', Message: '{response.Message ?? "null"}'");
+
             switch (response.Event)
             {
                 case "login":
@@ -155,9 +156,21 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         protected virtual void HandleLoginEvent(OKXWebSocketResponse response)
         {
-            if (response.Code == "0")
+            // OKX login success: code = "0" or no code field
+            // OKX login failure: code != "0"
+            if (string.IsNullOrEmpty(response.Code) || response.Code == "0")
             {
                 Log.Trace($"{GetType().Name}: Login successful (connId: {response.ConnectionId})");
+
+                // Subscribe to private channels after successful login
+                try
+                {
+                    SubscribePrivateChannels();
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"{GetType().Name}: Error subscribing to private channels after login: {ex}");
+                }
             }
             else
             {
@@ -171,19 +184,40 @@ namespace QuantConnect.Brokerages.OKX
 
         /// <summary>
         /// Handles subscribe event
+        /// OKX subscribe success: no code field or code = "0"
+        /// OKX subscribe failure: code field present and != "0"
         /// </summary>
         protected virtual void HandleSubscribeEvent(OKXWebSocketResponse response)
         {
-            if (response.Code == "0")
+            var channel = response.Arg?.Channel;
+            var instType = response.Arg?.InstrumentType;
+            var instId = response.Arg?.InstrumentId;
+
+            // Build subscription key for logging
+            var key = channel;
+            if (!string.IsNullOrEmpty(instType))
             {
-                var channel = response.Arg?.Channel;
-                var instId = response.Arg?.InstrumentId;
-                var key = string.IsNullOrEmpty(instId) ? channel : $"{channel}:{instId}";
-                Log.Trace($"{GetType().Name}: Subscription confirmed - {key}");
+                key += $" (instType: {instType})";
+            }
+            if (!string.IsNullOrEmpty(instId))
+            {
+                key += $" (instId: {instId})";
+            }
+
+            // Check if subscription was successful
+            // Success: no code field or code = "0"
+            // Failure: code field present and != "0"
+            if (string.IsNullOrEmpty(response.Code) || response.Code == "0")
+            {
+                Log.Trace($"{GetType().Name}: Subscription confirmed - {key}, connId: {response.ConnectionId}");
             }
             else
             {
-                Log.Error($"{GetType().Name}: Subscription failed - Code: {response.Code}, Message: {response.Message}");
+                Log.Error($"{GetType().Name}: Subscription failed - {key}, Code: {response.Code}, Message: {response.Message}");
+                OnMessage(new BrokerageMessageEvent(
+                    BrokerageMessageType.Error,
+                    response.Code,
+                    $"WebSocket subscription failed for {key}: {response.Message}"));
             }
         }
 
@@ -289,7 +323,8 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Handles individual order update
+        /// Handles individual order update from WebSocket orders channel
+        /// OKX orders channel pushes a message for each fill (trade execution)
         /// </summary>
         protected virtual void HandleOrderUpdate(OKXWebSocketOrder order)
         {
@@ -309,42 +344,6 @@ namespace QuantConnect.Brokerages.OKX
                     return;
                 }
 
-                // Map OKX state to LEAN OrderStatus
-                var status = MapOrderState(order.State);
-
-                // Parse filled quantities and prices
-                decimal.TryParse(order.FilledSize ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var filledQty);
-                decimal.TryParse(order.AveragePrice ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var avgPrice);
-                decimal.TryParse(order.Fee ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var feeAmount);
-
-                // Determine fill quantity for this event
-                var previousFillQty = _fills.GetOrAdd(orderId, 0m);
-                var fillQuantityDelta = filledQty - previousFillQty;
-
-                // Update fill tracking
-                if (fillQuantityDelta > 0)
-                {
-                    _fills[orderId] = filledQty;
-                }
-
-                // Adjust sign based on order direction
-                var signedFillQty = order.Side == "buy" ? fillQuantityDelta : -fillQuantityDelta;
-
-                // Create order event
-                var orderEvent = new OrderEvent
-                {
-                    OrderId = orderId,
-                    Status = status,
-                    FillPrice = avgPrice,
-                    FillQuantity = signedFillQty,
-                    OrderFee = new OrderFee(new CashAmount(Math.Abs(feeAmount), order.FeeCurrency ?? "USDT")),
-                    UtcTime = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(order.UpdateTime)).UtcDateTime,
-                    Message = $"OKX order {order.OrderId}: {order.State}"
-                };
-
-                // Emit event
-                OnOrderEvent(orderEvent);
-
                 // Register brokerage ID mapping if first time seeing this order
                 if (!string.IsNullOrEmpty(order.OrderId) && !_ordersByBrokerId.ContainsKey(order.OrderId))
                 {
@@ -357,7 +356,31 @@ namespace QuantConnect.Brokerages.OKX
                     }
                 }
 
-                Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Order {order.OrderId} ({order.ClientOrderId}): {order.State}, Filled: {filledQty}, Avg Price: {avgPrice}");
+                // Parse accumulated filled size for tracking
+                decimal.TryParse(order.FilledSize ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var accFillQty);
+                decimal.TryParse(order.LastFillSize ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var lastFillSize);
+
+                // Update fill tracking if there's a new fill
+                if (lastFillSize > 0)
+                {
+                    _fills[orderId] = accFillQty;
+                }
+
+                // Convert to OrderEvent using converter
+                var orderEvent = order.ToOrderEvent(leanOrder, accFillQty);
+                if (orderEvent != null)
+                {
+                    OnOrderEvent(orderEvent);
+
+                    if (lastFillSize > 0)
+                    {
+                        Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Order {order.OrderId} ({order.ClientOrderId}) filled: {lastFillSize}, Total: {accFillQty}/{order.Size}, Status: {orderEvent.Status}");
+                    }
+                    else
+                    {
+                        Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Order {order.OrderId} ({order.ClientOrderId}): {order.State}");
+                    }
+                }
             }
             catch (Exception ex)
             {

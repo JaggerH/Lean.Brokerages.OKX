@@ -14,26 +14,17 @@
 */
 
 using System;
-using System.Reflection;  // 用于 BindingFlags
-using System.Threading;   // 用于 Thread
 using NUnit.Framework;
-using QuantConnect.Tests;
-using QuantConnect.Data;  // 用于 SubscriptionDataConfig
-using QuantConnect.Data.Market;  // 用于 Tick
 using QuantConnect.Interfaces;
 using QuantConnect.Securities;
-using System.Collections.Generic;
-using System.Linq;
 using QuantConnect.Tests.Brokerages;
 using QuantConnect.Configuration;
 using Moq;
-using QuantConnect.Brokerages.OKX;
 using QuantConnect.Brokerages.OKX.RestApi;
 using QuantConnect.Tests.Common.Securities;
 using QuantConnect.Lean.Engine.DataFeeds;
 using QuantConnect.Orders;
 using QuantConnect.Logging;
-using NodaTime;  // 用于 TimeZones
 
 namespace QuantConnect.Brokerages.OKX.Tests
 {
@@ -89,7 +80,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         /// <summary>
         /// Gets the default order quantity
         /// </summary>
-        protected override decimal GetDefaultQuantity() => 0.1m;
+        protected override decimal GetDefaultQuantity() => 0.001m;
 
         /// <summary>
         /// Returns whether or not the broker's order methods implementation are async

@@ -19,6 +19,7 @@ using QuantConnect.Brokerages.OKX.Messages;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
+using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 
 namespace QuantConnect.Brokerages.OKX.Converters
@@ -198,6 +199,139 @@ namespace QuantConnect.Brokerages.OKX.Converters
 
             // Default to spot: BTC-USDT
             return SecurityType.Crypto;
+        }
+    }
+
+    /// <summary>
+    /// Extension methods for converting OKX WebSocket order updates to LEAN OrderEvents
+    /// </summary>
+    public static class WebSocketOrderExtensions
+    {
+        /// <summary>
+        /// Converts OKX WebSocket order update to LEAN OrderEvent
+        /// OKX orders channel pushes a message for each fill (trade execution)
+        /// </summary>
+        /// <param name="order">OKX WebSocket order update</param>
+        /// <param name="leanOrder">The LEAN order associated with this update</param>
+        /// <param name="accumulatedFillSize">Total accumulated fill size for this order</param>
+        /// <returns>LEAN OrderEvent or null if this is not a fill event</returns>
+        public static OrderEvent ToOrderEvent(this OKXWebSocketOrder order, Order leanOrder, decimal accumulatedFillSize)
+        {
+            if (order == null || leanOrder == null)
+            {
+                return null;
+            }
+
+            // Parse last fill size
+            if (!decimal.TryParse(order.LastFillSize ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var lastFillSize))
+            {
+                lastFillSize = 0;
+            }
+
+            // Map OKX state to LEAN OrderStatus
+            var status = ConvertOrderStatus(order.State);
+
+            // Check if this is a fill event (lastFillSize > 0)
+            if (lastFillSize > 0)
+            {
+                // Parse last fill price (fallback to average price if not available)
+                if (!decimal.TryParse(order.LastFillPrice ?? order.AveragePrice ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var lastFillPrice))
+                {
+                    lastFillPrice = 0;
+                }
+
+                // Parse last fill fee
+                if (!decimal.TryParse(order.LastFillFee ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var lastFillFee))
+                {
+                    lastFillFee = 0;
+                }
+
+                // Adjust sign based on order direction
+                var signedFillQty = order.Side == "buy" ? lastFillSize : -lastFillSize;
+
+                // Determine fee currency
+                var feeCurrency = !string.IsNullOrEmpty(order.LastFillFeeCurrency)
+                    ? order.LastFillFeeCurrency
+                    : order.FeeCurrency ?? "USDT";
+
+                // Parse fill time (use UpdateTime if FillTime is not available)
+                long fillTimeMs;
+                if (!string.IsNullOrEmpty(order.LastFillTime) && long.TryParse(order.LastFillTime, out fillTimeMs))
+                {
+                    // Use fill time
+                }
+                else if (long.TryParse(order.UpdateTime, out fillTimeMs))
+                {
+                    // Fallback to update time
+                }
+                else
+                {
+                    fillTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                }
+
+                // Create fill event
+                return new OrderEvent(
+                    leanOrder.Id,
+                    leanOrder.Symbol,
+                    DateTimeOffset.FromUnixTimeMilliseconds(fillTimeMs).UtcDateTime,
+                    status,
+                    leanOrder.Direction,
+                    lastFillPrice,
+                    signedFillQty,
+                    new OrderFee(new CashAmount(Math.Abs(lastFillFee), feeCurrency)),
+                    $"OKX order {order.OrderId}: {order.State}, Fill: {lastFillSize} @ {lastFillPrice}"
+                );
+            }
+
+            // Order state change without fill (e.g., canceled, submitted)
+            long updateTimeMs;
+            if (!long.TryParse(order.UpdateTime, out updateTimeMs))
+            {
+                updateTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            }
+
+            return new OrderEvent(
+                leanOrder.Id,
+                leanOrder.Symbol,
+                DateTimeOffset.FromUnixTimeMilliseconds(updateTimeMs).UtcDateTime,
+                status,
+                leanOrder.Direction,
+                0,
+                0,
+                OrderFee.Zero,
+                $"OKX order {order.OrderId}: {order.State}"
+            );
+        }
+
+        /// <summary>
+        /// Converts OKX order state to LEAN OrderStatus
+        /// </summary>
+        /// <param name="okxState">OKX order state: live, partially_filled, filled, canceled</param>
+        /// <returns>LEAN OrderStatus</returns>
+        private static OrderStatus ConvertOrderStatus(string okxState)
+        {
+            switch (okxState?.ToLowerInvariant())
+            {
+                case "live":
+                    return OrderStatus.Submitted;
+
+                case "partially_filled":
+                    return OrderStatus.PartiallyFilled;
+
+                case "filled":
+                    return OrderStatus.Filled;
+
+                case "canceled":
+                case "cancelled":
+                    return OrderStatus.Canceled;
+
+                case "canceling":
+                    return OrderStatus.CancelPending;
+
+                default:
+                    Log.Error($"WebSocketOrderExtensions.ConvertOrderStatus(): Unknown OKX order state: {okxState}");
+                    return OrderStatus.None;
+            }
         }
     }
 }

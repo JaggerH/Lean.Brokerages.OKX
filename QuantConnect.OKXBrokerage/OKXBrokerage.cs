@@ -15,12 +15,11 @@
 
 using System;
 using System.Collections.Generic;
-using QuantConnect.Brokerages.OKX.RestApi;
+using Newtonsoft.Json;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
-using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 using QuantConnect.Util;
 
@@ -101,33 +100,92 @@ namespace QuantConnect.Brokerages.OKX
         // ========================================
 
         /// <summary>
-        /// Initializes the REST API client
-        /// </summary>
-        protected override void InitializeRestClient(string apiKey, string apiSecret)
-        {
-            // OKX requires passphrase in addition to key/secret
-            // This is stored during Initialize() call in base
-            // RestApiClient property is set in base class
-        }
-
-        /// <summary>
         /// Sends authentication request to private WebSocket channel
+        /// OKX WebSocket login format: {"op": "login", "args": [{apiKey, passphrase, timestamp, sign}]}
+        /// Signature: timestamp + "GET" + "/users/self/verify"
         /// </summary>
         protected override void SendAuthenticationRequest()
         {
-            // Authentication is handled automatically by BaseWebsocketsBrokerage
-            // using apiKey and apiSecret stored during Initialize()
-            Log.Trace("OKXBrokerage.SendAuthenticationRequest(): WebSocket authentication initiated");
+            try
+            {
+                // Generate timestamp (Unix seconds)
+                var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+
+                // Build signature string: timestamp + method + requestPath
+                var method = "GET";
+                var requestPath = "/users/self/verify";
+                var signatureInput = timestamp + method + requestPath;
+
+                // Generate HMAC-SHA256 signature
+                var signature = OKXUtility.GenerateHmacSignature(signatureInput, ApiSecret);
+
+                // Build login message
+                var loginMessage = new Messages.OKXWebSocketMessage
+                {
+                    Operation = "login",
+                    Arguments = new List<object>
+                    {
+                        new Messages.OKXWebSocketLoginArgs
+                        {
+                            ApiKey = ApiKey,
+                            Passphrase = Passphrase,
+                            Timestamp = timestamp,
+                            Sign = signature
+                        }
+                    }
+                };
+
+                // Send login request
+                var message = JsonConvert.SerializeObject(loginMessage);
+                WebSocket.Send(message);
+
+                Log.Trace("OKXBrokerage.SendAuthenticationRequest(): Login request sent");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXBrokerage.SendAuthenticationRequest(): Error: {ex}");
+            }
         }
 
         /// <summary>
         /// Subscribes to private channels (orders, account, positions)
+        /// Called automatically after successful WebSocket authentication
         /// </summary>
         protected override void SubscribePrivateChannels()
         {
-            // Private channel subscriptions are handled by base class WebSocket infrastructure
-            // Subscription messages are sent automatically after authentication
-            Log.Trace("OKXBrokerage.SubscribePrivateChannels(): Private channels will be subscribed after authentication");
+            try
+            {
+                Log.Trace("OKXBrokerage.SubscribePrivateChannels(): Starting private channel subscription...");
+
+                // Subscribe to orders channel for all instrument types
+                // This provides real-time order updates and fill information
+                var ordersChannel = new Messages.OKXWebSocketChannel
+                {
+                    Channel = "orders",
+                    InstrumentType = "ANY"  // Subscribe to all instrument types (SPOT, SWAP, FUTURES, etc.)
+                };
+
+                var subscribeMessage = new Messages.OKXWebSocketMessage
+                {
+                    Operation = "subscribe",
+                    Arguments = new List<object> { ordersChannel }
+                };
+
+                var message = JsonConvert.SerializeObject(subscribeMessage);
+                Log.Trace($"OKXBrokerage.SubscribePrivateChannels(): Sending subscription message: {message}");
+
+                WebSocket.Send(message);
+
+                Log.Trace("OKXBrokerage.SubscribePrivateChannels(): Subscription message sent for orders channel (instType: ANY)");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXBrokerage.SubscribePrivateChannels(): Error subscribing to private channels: {ex}");
+                OnMessage(new BrokerageMessageEvent(
+                    BrokerageMessageType.Error,
+                    "PrivateChannelSubscription",
+                    $"Failed to subscribe to private channels: {ex.Message}"));
+            }
         }
 
         /// <summary>

@@ -119,6 +119,11 @@ namespace QuantConnect.Brokerages.OKX
         // ========================================
 
         /// <summary>
+        /// API passphrase for authentication (OKX-specific)
+        /// </summary>
+        protected string Passphrase { get; set; }
+
+        /// <summary>
         /// REST API client for OKX API v5
         /// </summary>
         protected OKXRestApiClient RestApiClient { get; private set; }
@@ -129,10 +134,10 @@ namespace QuantConnect.Brokerages.OKX
 
         /// <summary>
         /// Returns true if connected to the broker
-        /// Checks if the REST API client is initialized or WebSocket is connected
-        /// REST API client initialization indicates the brokerage is ready for operations
+        /// Checks if WebSocket is connected (for real-time updates)
+        /// Note: REST API is always available after initialization, but WebSocket is needed for OrderEvents
         /// </summary>
-        public override bool IsConnected => RestApiClient != null || WebSocket?.IsOpen == true;
+        public override bool IsConnected => WebSocket?.IsOpen == true;
 
         /// <summary>
         /// Gets the account base currency (USDT for OKX)
@@ -207,24 +212,27 @@ namespace QuantConnect.Brokerages.OKX
                 return;
             }
 
-            // Get WebSocket URL from OKXEnvironment
-            // OKX uses separate URLs for public (market data) and private (orders/account) channels
-            var wssUrl = OKXEnvironment.GetWebSocketPublicUrl();
+            // Get WebSocket URLs from OKXEnvironment
+            // OKX requires separate WebSocket connections for public (market data) and private (orders/account) channels
+            var privateWssUrl = OKXEnvironment.GetWebSocketPrivateUrl();  // For authentication and orders channel
+            var publicWssUrl = OKXEnvironment.GetWebSocketPublicUrl();    // For market data subscriptions
 
             // 1. Call base initialization first (establishes WebSocket infrastructure, stores apiKey/apiSecret)
             // Use factory method for WebSocket to allow test injection
-            base.Initialize(wssUrl, CreateWebSocket(), null, apiKey, apiSecret);
+            // IMPORTANT: Use private URL for base WebSocket - it handles authentication and private channels (orders, account)
+            base.Initialize(privateWssUrl, CreateWebSocket(), null, apiKey, apiSecret);
 
             // 2. Set instance variables (after base.Initialize, following Binance pattern)
             _algorithm = algorithm;
             _job = job;
+            Passphrase = passphrase;
 
             // 3. Initialize SubscriptionManager for market data (public channels)
             // Note: Private channels (orders, balances) use BaseWebsocketsBrokerage.WebSocket directly
             var maximumWebSocketConnections = Config.GetInt("okx-maximum-websocket-connections", 0);
 
             var subscriptionManager = new BrokerageMultiWebSocketSubscriptionManager(
-                wssUrl,
+                publicWssUrl,
                 MaximumSymbolsPerConnection,  // 512 (estimated from OKX 64KB limit)
                 maximumWebSocketConnections,  // From config, default 0 = unlimited
                 null,                         // symbolWeights (null = no weighting)
@@ -291,16 +299,6 @@ namespace QuantConnect.Brokerages.OKX
 
             Log.Trace($"{GetType().Name}.Initialize(): Initialization complete (Environment: {OKXEnvironment.GetEnvironmentName()})");
         }
-
-        /// <summary>
-        /// Initializes the REST API client
-        /// Subclasses must implement this to create their specific REST client
-        /// Called during Initialize() after base initialization
-        /// </summary>
-        /// <param name="apiKey">API key</param>
-        /// <param name="apiSecret">API secret</param>
-        protected abstract void InitializeRestClient(string apiKey, string apiSecret);
-
         /// <summary>
         /// Creates the WebSocket client instance
         /// Override in test classes to inject mock WebSocket
