@@ -129,8 +129,10 @@ namespace QuantConnect.Brokerages.OKX
 
         /// <summary>
         /// Returns true if connected to the broker
+        /// Checks if the REST API client is initialized or WebSocket is connected
+        /// REST API client initialization indicates the brokerage is ready for operations
         /// </summary>
-        public override bool IsConnected => WebSocket?.IsOpen ?? false;
+        public override bool IsConnected => RestApiClient != null || WebSocket?.IsOpen == true;
 
         /// <summary>
         /// Gets the account base currency (USDT for OKX)
@@ -223,7 +225,7 @@ namespace QuantConnect.Brokerages.OKX
 
             var subscriptionManager = new BrokerageMultiWebSocketSubscriptionManager(
                 wssUrl,
-                MaximumSymbolsPerConnection,  // 100 (OKX limit)
+                MaximumSymbolsPerConnection,  // 512 (estimated from OKX 64KB limit)
                 maximumWebSocketConnections,  // From config, default 0 = unlimited
                 null,                         // symbolWeights (null = no weighting)
                 () => new OKXWebSocketWrapper(null),  // WebSocket factory
