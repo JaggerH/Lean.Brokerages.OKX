@@ -375,10 +375,6 @@ namespace QuantConnect.Brokerages.OKX
                     }
                 }
 
-                // Parse accumulated filled size for tracking
-                decimal.TryParse(order.FilledSize ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var accFillQty);
-                _fills[orderId] = accFillQty;
-
                 // Convert to OrderEvent using converter
                 var orderEvent = order.ToOrderEvent(leanOrder);
                 if (orderEvent != null)

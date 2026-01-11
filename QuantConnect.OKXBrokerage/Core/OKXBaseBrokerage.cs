@@ -79,11 +79,6 @@ namespace QuantConnect.Brokerages.OKX
         protected virtual RateGate OrderRateLimiter { get; } = new(10, TimeSpan.FromSeconds(1));
 
         /// <summary>
-        /// Track cumulative fill quantities
-        /// </summary>
-        protected readonly System.Collections.Concurrent.ConcurrentDictionary<int, decimal> _fills = new();
-
-        /// <summary>
         /// Fast reverse lookup: OKX Brokerage Order ID -> LEAN Order
         /// </summary>
         protected readonly System.Collections.Concurrent.ConcurrentDictionary<string, Order> _ordersByBrokerId = new();
