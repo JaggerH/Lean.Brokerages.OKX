@@ -198,13 +198,16 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Validates account configuration
-        /// Ensures position mode is net_mode (one-way) and logs account level
-        /// Throws exception if validation fails
+        /// Validates and configures account settings
+        /// 1. Validates acctLv matches config (cannot auto-fix, requires manual change)
+        /// 2. Auto-sets posMode to net_mode if needed
+        /// 3. Auto-sets autoLoan to true if needed (for multi-currency/portfolio margin)
+        /// 4. Auto-sets feeType to "1" (quote currency) if needed
+        /// 5. Auto-sets settleCcy to "USDT" if needed
         /// </summary>
         protected override void ValidateAccountMode()
         {
-            Log.Trace("OKXBrokerage.ValidateAccountMode(): Validating account configuration");
+            Log.Trace("OKXBrokerage.ValidateAccountMode(): Validating and configuring account settings");
 
             try
             {
@@ -212,39 +215,87 @@ namespace QuantConnect.Brokerages.OKX
 
                 if (config == null)
                 {
-                    var errorMessage = "Failed to retrieve account configuration from OKX. Please verify API credentials and permissions.";
-                    Log.Error($"OKXBrokerage.ValidateAccountMode(): {errorMessage}");
-                    throw new Exception(errorMessage);
+                    throw new Exception("Failed to retrieve account configuration from OKX. Please verify API credentials and permissions.");
                 }
 
-                // Map account level to human-readable description
+                // 1. Validate account level (cannot auto-fix)
+                var configuredLevel = Configuration.Config.Get("okx-unified-account-mode", "1");
                 var accountLevelDescription = config.AccountLevel switch
                 {
-                    "1" => "Simple (Spot trading only)",
+                    "1" => "Simple (Spot only)",
                     "2" => "Single-currency margin",
                     "3" => "Multi-currency margin",
                     "4" => "Portfolio margin",
-                    _ => $"Unknown (Level: {config.AccountLevel})"
+                    _ => $"Unknown ({config.AccountLevel})"
                 };
-
                 Log.Trace($"OKXBrokerage.ValidateAccountMode(): Account Level: {accountLevelDescription}");
 
-                // Validate position mode - must be net_mode (one-way)
-                if (config.PositionMode != "net_mode")
+                if (config.AccountLevel != configuredLevel)
                 {
-                    var errorMessage = $"Position mode mismatch: current='{config.PositionMode}', required='net_mode'. " +
-                                     $"Please change your OKX account position mode to 'One-way Mode' (net_mode) in your account settings. " +
-                                     $"Go to OKX -> Settings -> Trading Preferences -> Position Mode -> Select 'One-way Mode'.";
-                    Log.Error($"OKXBrokerage.ValidateAccountMode(): {errorMessage}");
-                    throw new Exception(errorMessage);
+                    throw new Exception($"Account level mismatch: OKX account is '{accountLevelDescription}', but config expects level '{configuredLevel}'. " +
+                                       $"Please update 'okx-unified-account-mode' in config or change your OKX account level.");
                 }
 
-                Log.Trace($"OKXBrokerage.ValidateAccountMode(): Position mode validated successfully (net_mode)");
+                // 2. Position mode: auto-set to net_mode
+                if (config.PositionMode != "net_mode")
+                {
+                    Log.Trace($"OKXBrokerage.ValidateAccountMode(): Setting position mode from '{config.PositionMode}' to 'net_mode'");
+                    if (!RestApiClient.SetPositionMode("net_mode"))
+                    {
+                        throw new Exception("Failed to set position mode to 'net_mode'. Please close all positions and try again, or set manually in OKX settings.");
+                    }
+                }
+                Log.Trace("OKXBrokerage.ValidateAccountMode(): Position mode: net_mode ✓");
+
+                // 3. Auto loan: auto-set to true (only for multi-currency/portfolio margin modes)
+                if (config.AccountLevel == "3" || config.AccountLevel == "4")
+                {
+                    if (!config.AutoLoan)
+                    {
+                        Log.Trace("OKXBrokerage.ValidateAccountMode(): Setting autoLoan to true");
+                        if (!RestApiClient.SetAutoLoan(true))
+                        {
+                            Log.Error("OKXBrokerage.ValidateAccountMode(): Failed to set autoLoan to true");
+                        }
+                    }
+                    Log.Trace($"OKXBrokerage.ValidateAccountMode(): Auto loan: {config.AutoLoan} ✓");
+                }
+
+                // 4. Fee type: auto-set to "1" (quote currency)
+                if (config.FeeType != "1")
+                {
+                    Log.Trace($"OKXBrokerage.ValidateAccountMode(): Setting feeType from '{config.FeeType}' to '1' (quote currency)");
+                    if (!RestApiClient.SetFeeType("1"))
+                    {
+                        Log.Error("OKXBrokerage.ValidateAccountMode(): Failed to set feeType to '1'. Spot fees will be charged in received currency.");
+                    }
+                }
+                Log.Trace("OKXBrokerage.ValidateAccountMode(): Fee type: quote currency ✓");
+
+                // 5. Settlement currency: auto-set to USDT (only if available in settleCcyList)
+                const string targetSettleCcy = "USDT";
+                if (config.SettleCurrencyList?.Contains(targetSettleCcy) == true)
+                {
+                    if (config.SettleCurrency != targetSettleCcy)
+                    {
+                        Log.Trace($"OKXBrokerage.ValidateAccountMode(): Setting settleCcy from '{config.SettleCurrency}' to '{targetSettleCcy}'");
+                        if (!RestApiClient.SetSettleCurrency(targetSettleCcy))
+                        {
+                            Log.Error($"OKXBrokerage.ValidateAccountMode(): Failed to set settleCcy to '{targetSettleCcy}'");
+                        }
+                    }
+                    Log.Trace($"OKXBrokerage.ValidateAccountMode(): Settlement currency: {targetSettleCcy} ✓");
+                }
+                else
+                {
+                    Log.Trace($"OKXBrokerage.ValidateAccountMode(): Settlement currency: {config.SettleCurrency} (USDT not available, options: {string.Join(", ", config.SettleCurrencyList ?? new List<string>())})");
+                }
+
+                Log.Trace("OKXBrokerage.ValidateAccountMode(): Account configuration validated successfully");
             }
-            catch (Exception ex) when (!(ex.Message.Contains("Position mode mismatch") || ex.Message.Contains("Failed to retrieve account configuration")))
+            catch (Exception ex) when (!ex.Message.Contains("mismatch") && !ex.Message.Contains("Failed to retrieve"))
             {
-                // Log other errors but don't block connection (API might be temporarily unavailable)
-                Log.Error($"OKXBrokerage.ValidateAccountMode(): Warning - failed to validate account configuration: {ex.Message}");
+                Log.Error($"OKXBrokerage.ValidateAccountMode(): Warning - {ex.Message}");
             }
         }
     }

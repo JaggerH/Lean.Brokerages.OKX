@@ -15,6 +15,8 @@
 
 using System;
 using System.Globalization;
+using Microsoft.Extensions.Caching.Memory;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using QuantConnect.Brokerages.OKX.Converters;
 using QuantConnect.Brokerages.OKX.Messages;
@@ -323,13 +325,30 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Handles individual order update from WebSocket orders channel
-        /// OKX orders channel pushes a message for each fill (trade execution)
+        /// Handles individual order update from WebSocket orders channel.
+        /// Per OKX docs:
+        /// - When tradeId has value: this is a fill event, deduplicate by tradeId
+        /// - When tradeId is empty and state=filled: this is a market order close event
+        /// - Duplicate messages may be pushed (with different uTime), only process first
         /// </summary>
         protected virtual void HandleOrderUpdate(OKXWebSocketOrder order)
         {
             try
             {
+                // Log raw OKX order data for debugging
+                Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Raw data - {JsonConvert.SerializeObject(order)}");
+
+                // Deduplicate by tradeId - per OKX docs, for the same tradeId, only process first message
+                if (!string.IsNullOrEmpty(order.TradeId))
+                {
+                    if (_processedTradeIds.TryGetValue(order.TradeId, out bool _))
+                    {
+                        Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Duplicate tradeId ignored: {order.TradeId}");
+                        return;
+                    }
+                    _processedTradeIds.Set(order.TradeId, true, TimeSpan.FromMinutes(5));
+                }
+
                 // Parse client order ID to get LEAN order ID
                 if (!int.TryParse(order.ClientOrderId ?? "0", out var orderId))
                 {
@@ -358,28 +377,13 @@ namespace QuantConnect.Brokerages.OKX
 
                 // Parse accumulated filled size for tracking
                 decimal.TryParse(order.FilledSize ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var accFillQty);
-                decimal.TryParse(order.LastFillSize ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var lastFillSize);
-
-                // Update fill tracking if there's a new fill
-                if (lastFillSize > 0)
-                {
-                    _fills[orderId] = accFillQty;
-                }
+                _fills[orderId] = accFillQty;
 
                 // Convert to OrderEvent using converter
-                var orderEvent = order.ToOrderEvent(leanOrder, accFillQty);
+                var orderEvent = order.ToOrderEvent(leanOrder);
                 if (orderEvent != null)
                 {
                     OnOrderEvent(orderEvent);
-
-                    if (lastFillSize > 0)
-                    {
-                        Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Order {order.OrderId} ({order.ClientOrderId}) filled: {lastFillSize}, Total: {accFillQty}/{order.Size}, Status: {orderEvent.Status}");
-                    }
-                    else
-                    {
-                        Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Order {order.OrderId} ({order.ClientOrderId}): {order.State}");
-                    }
                 }
             }
             catch (Exception ex)

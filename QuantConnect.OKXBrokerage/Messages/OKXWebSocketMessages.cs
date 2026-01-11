@@ -402,6 +402,14 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// </summary>
         [JsonProperty("cTime")]
         public string CreateTime { get; set; }
+
+        /// <summary>
+        /// Trade ID - indicates this is a fill event when present.
+        /// Per OKX docs: when tradeId has value, it represents a trade/fill.
+        /// When tradeId is empty and state is filled, it represents market order close.
+        /// </summary>
+        [JsonProperty("tradeId")]
+        public string TradeId { get; set; }
     }
 
     /// <summary>

@@ -13,6 +13,7 @@
  * limitations under the License.
 */
 
+using System.Collections.Generic;
 using Newtonsoft.Json;
 
 namespace QuantConnect.Brokerages.OKX.Messages
@@ -76,5 +77,25 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// </summary>
         [JsonProperty("mgnIsoMode")]
         public string MarginIsoMode { get; set; }
+
+        /// <summary>
+        /// Fee type for spot trading
+        /// 0: Fee charged in received currency (default)
+        /// 1: Fee charged in quote currency
+        /// </summary>
+        [JsonProperty("feeType")]
+        public string FeeType { get; set; }
+
+        /// <summary>
+        /// Settlement currency for USD-margined contracts (e.g., USDT, USDC)
+        /// </summary>
+        [JsonProperty("settleCcy")]
+        public string SettleCurrency { get; set; }
+
+        /// <summary>
+        /// Available settlement currencies for USD-margined contracts (e.g., ["USD", "USDC", "USDG"])
+        /// </summary>
+        [JsonProperty("settleCcyList")]
+        public List<string> SettleCurrencyList { get; set; }
     }
 }

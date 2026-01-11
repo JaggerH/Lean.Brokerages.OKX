@@ -314,6 +314,102 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         }
 
         /// <summary>
+        /// Sets the position mode for the account
+        /// POST /api/v5/account/set-position-mode
+        /// </summary>
+        public bool SetPositionMode(string posMode)
+        {
+            try
+            {
+                var response = Post<OKXApiResponse<AccountConfig>>("/account/set-position-mode", new { posMode }, null);
+                if (response?.IsSuccess == true)
+                {
+                    Log.Trace($"OKXRestApiClient.SetPositionMode(): Set to {posMode}");
+                    return true;
+                }
+                Log.Error($"OKXRestApiClient.SetPositionMode(): Failed - {response?.Code}: {response?.Message}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.SetPositionMode(): Exception: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Sets auto loan for margin trading
+        /// POST /api/v5/account/set-auto-loan
+        /// </summary>
+        public bool SetAutoLoan(bool autoLoan)
+        {
+            try
+            {
+                var response = Post<OKXApiResponse<AccountConfig>>("/account/set-auto-loan", new { autoLoan }, null);
+                if (response?.IsSuccess == true)
+                {
+                    Log.Trace($"OKXRestApiClient.SetAutoLoan(): Set to {autoLoan}");
+                    return true;
+                }
+                Log.Error($"OKXRestApiClient.SetAutoLoan(): Failed - {response?.Code}: {response?.Message}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.SetAutoLoan(): Exception: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Sets fee type for spot trading
+        /// POST /api/v5/account/set-fee-type
+        /// </summary>
+        public bool SetFeeType(string feeType)
+        {
+            try
+            {
+                var response = Post<OKXApiResponse<AccountConfig>>("/account/set-fee-type", new { feeType }, null);
+                if (response?.IsSuccess == true)
+                {
+                    Log.Trace($"OKXRestApiClient.SetFeeType(): Set to {feeType}");
+                    return true;
+                }
+                Log.Error($"OKXRestApiClient.SetFeeType(): Failed - {response?.Code}: {response?.Message}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.SetFeeType(): Exception: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Sets settlement currency for USD-margined contracts
+        /// POST /api/v5/account/set-settle-currency
+        /// </summary>
+        public bool SetSettleCurrency(string settleCcy)
+        {
+            try
+            {
+                var response = Post<OKXApiResponse<AccountConfig>>("/account/set-settle-currency", new { settleCcy }, null);
+                if (response?.IsSuccess == true)
+                {
+                    Log.Trace($"OKXRestApiClient.SetSettleCurrency(): Set to {settleCcy}");
+                    return true;
+                }
+                Log.Error($"OKXRestApiClient.SetSettleCurrency(): Failed - {response?.Code}: {response?.Message}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.SetSettleCurrency(): Exception: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Gets candlestick/K-line data for a specific instrument
         /// https://www.okx.com/docs-v5/en/#rest-api-market-data-get-candlesticks
         /// No authentication required

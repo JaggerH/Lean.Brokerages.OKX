@@ -17,6 +17,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json;
 using QuantConnect.Brokerages.OKX.RestApi;
 using QuantConnect.Configuration;
@@ -91,6 +92,13 @@ namespace QuantConnect.Brokerages.OKX
         /// Fast reverse lookup: OKX Brokerage Order ID -> LEAN Order
         /// </summary>
         protected readonly System.Collections.Concurrent.ConcurrentDictionary<string, Order> _ordersByBrokerId = new();
+
+        /// <summary>
+        /// Track processed trade IDs to prevent duplicate fill events.
+        /// Per OKX docs: for the same tradeId, only process the first push message.
+        /// Uses MemoryCache with auto-expiration (5 minutes) to prevent unbounded growth.
+        /// </summary>
+        protected readonly IMemoryCache _processedTradeIds = new MemoryCache(new MemoryCacheOptions());
 
         /// <summary>
         /// Login state tracking
