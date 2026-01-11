@@ -29,12 +29,12 @@ using QuantConnect.Logging;
 namespace QuantConnect.Brokerages.OKX.Tests
 {
     /// <summary>
-    /// Integration tests for OKX Spot market using the BrokerageTests framework
+    /// Integration tests for OKX Futures market using the BrokerageTests framework
     /// Tests inherit standard order flow scenarios with Mock Algorithm setup
     /// </summary>
     [TestFixture]
-    [Explicit("Requires valid OKX credentials and Spot market balance")]
-    public class OKXSpotBrokerageTests : BrokerageTests
+    [Explicit("Requires valid OKX credentials and Futures market balance")]
+    public class OKXFutureBrokerageTests : BrokerageTests
     {
         /// <summary>
         /// Creates the brokerage under test and connects it
@@ -70,17 +70,17 @@ namespace QuantConnect.Brokerages.OKX.Tests
         /// Gets the symbol to be traded, must be shortable
         /// </summary>
         protected override Symbol Symbol => StaticSymbol;
-        private static Symbol StaticSymbol => Symbol.Create("BTCUSDT", SecurityType.Crypto, Market.OKX);
+        private static Symbol StaticSymbol => Symbol.Create("BTCUSDT", SecurityType.CryptoFuture, Market.OKX);
 
         /// <summary>
         /// Gets the security type associated with the Symbol
         /// </summary>
-        protected override SecurityType SecurityType => SecurityType.Crypto;
+        protected override SecurityType SecurityType => SecurityType.CryptoFuture;
 
         /// <summary>
-        /// Gets the default order quantity
+        /// Gets the default order quantity (1 contract)
         /// </summary>
-        protected override decimal GetDefaultQuantity() => 0.01m;
+        protected override decimal GetDefaultQuantity() => 1m;
 
         /// <summary>
         /// Returns whether or not the broker's order methods implementation are async
@@ -118,29 +118,29 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 var passphrase = Config.Get("okx-passphrase");
                 var client = new OKXRestApiClient(apiKey, apiSecret, passphrase);
 
-                // Get ticker data for BTC-USDT
-                var ticker = client.GetTickerInfo("BTC-USDT");
+                // Get ticker data for BTC-USDT-SWAP (Perpetual Futures)
+                var ticker = client.GetTickerInfo("BTC-USDT-SWAP");
 
                 if (ticker != null && ticker.LowestAsk > 0 && ticker.HighestBid > 0)
                 {
                     var high = ticker.LowestAsk * 1.05m;  // 5% above ask
                     var low = ticker.HighestBid * 0.95m;  // 5% below bid
-                    Log.Trace($"[Spot] Dynamic prices: bid={ticker.HighestBid}, ask={ticker.LowestAsk} → high={high:F2}, low={low:F2}");
+                    Log.Trace($"[Futures] Dynamic prices: bid={ticker.HighestBid}, ask={ticker.LowestAsk} → high={high:F2}, low={low:F2}");
                     return (high, low);
                 }
             }
             catch (Exception ex)
             {
-                Log.Error($"[Spot] Failed to fetch market prices: {ex.Message}");
+                Log.Error($"[Futures] Failed to fetch market prices: {ex.Message}");
             }
 
-            Log.Trace($"[Spot] Using fallback prices: high={fallbackHigh}, low={fallbackLow}");
+            Log.Trace($"[Futures] Using fallback prices: high={fallbackHigh}, low={fallbackLow}");
             return (fallbackHigh, fallbackLow);
         });
 
         /// <summary>
         /// Provides the data required to test each order type in various cases
-        /// Note: OKX supports Market and Limit orders for Spot trading
+        /// Note: OKX supports Market and Limit orders for Futures trading
         /// Prices are dynamically fetched from market on first access
         /// </summary>
         private static TestCaseData[] OrderParameters =>
@@ -151,16 +151,16 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
         [Test]
         [TestCaseSource(nameof(OrderParameters))]
-        [Category("Spot")]
-        public void SpotCancelOrders(OrderTestParameters parameters)
+        [Category("Futures")]
+        public void FutureCancelOrders(OrderTestParameters parameters)
         {
             base.CancelOrders(parameters);
         }
 
         [Test]
         [TestCaseSource(nameof(OrderParameters))]
-        [Category("Spot")]
-        public void SpotLongFromZero(OrderTestParameters parameters)
+        [Category("Futures")]
+        public void FutureLongFromZero(OrderTestParameters parameters)
         {
             base.LongFromZero(parameters);
 
@@ -175,27 +175,44 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
         [Test]
         [TestCaseSource(nameof(OrderParameters))]
-        [Category("Spot")]
-        public void SpotCloseFromLong(OrderTestParameters parameters)
+        [Category("Futures")]
+        public void FutureShortFromZero(OrderTestParameters parameters)
+        {
+            base.ShortFromZero(parameters);
+
+            // For non-market orders, verify the order is in the open orders list
+            if (parameters is not MarketOrderTestParameters)
+            {
+                var openOrders = Brokerage.GetOpenOrders();
+                Assert.AreEqual(1, openOrders.Count);
+                Assert.IsInstanceOf<LimitOrder>(openOrders[0]);
+            }
+        }
+
+        [Test]
+        [TestCaseSource(nameof(OrderParameters))]
+        [Category("Futures")]
+        public void FutureCloseFromLong(OrderTestParameters parameters)
         {
             base.CloseFromLong(parameters);
         }
 
-        [Test, Ignore("Spot holdings are managed through cash balances. GetAccountHoldings returns empty for spot trading.")]
-        [Category("Spot")]
+        [Test]
+        [Category("Futures")]
         public override void GetAccountHoldings()
         {
             Log.Trace("");
-            Log.Trace("GET ACCOUNT HOLDINGS - SPOT");
+            Log.Trace("GET ACCOUNT HOLDINGS - FUTURES");
             Log.Trace("");
 
             var holdings = Brokerage.GetAccountHoldings();
 
-            // For spot trading, holdings should be empty as positions are tracked via cash balances
-            Assert.AreEqual(0, holdings.Count, "Spot trading should return empty holdings");
-
             // Log for verification
-            Log.Trace($"Holdings count: {holdings.Count} (expected: 0)");
+            Log.Trace($"Holdings count: {holdings.Count}");
+            foreach (var holding in holdings)
+            {
+                Log.Trace($"  {holding.Symbol}: Qty={holding.Quantity}, AvgPrice={holding.AveragePrice}");
+            }
         }
     }
 }

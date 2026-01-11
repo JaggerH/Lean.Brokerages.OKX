@@ -262,10 +262,11 @@ namespace QuantConnect.Brokerages.OKX
                 }
 
                 // 4. Fee type: auto-set to "1" (quote currency)
-                if (config.FeeType != "1")
+                var targetFeeType = "0";
+                if (config.FeeType != targetFeeType)
                 {
                     Log.Trace($"OKXBrokerage.ValidateAccountMode(): Setting feeType from '{config.FeeType}' to '1' (quote currency)");
-                    if (!RestApiClient.SetFeeType("1"))
+                    if (!RestApiClient.SetFeeType(targetFeeType))
                     {
                         Log.Error("OKXBrokerage.ValidateAccountMode(): Failed to set feeType to '1'. Spot fees will be charged in received currency.");
                     }

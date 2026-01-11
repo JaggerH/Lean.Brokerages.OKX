@@ -26,8 +26,13 @@ namespace QuantConnect.Brokerages.OKX
     /// </summary>
     public abstract partial class OKXBaseBrokerage
     {
+        /// <summary>
+        /// Default price buffer for converting market buy orders to FOK limit orders (0.3%)
+        /// </summary>
+        private const decimal DefaultMarketBuyPriceBuffer = 0.003m;
+
         // ========================================
-        // ORDER MANAGEMENT METHODS
+        // ORDER ROUTING
         // ========================================
 
         /// <summary>
@@ -43,123 +48,23 @@ namespace QuantConnect.Brokerages.OKX
                 // Convert LEAN symbol to OKX instrument ID
                 var instId = _symbolMapper.GetBrokerageSymbol(order.Symbol);
 
-                // Determine order side (buy/sell) from quantity
-                var side = order.Quantity > 0 ? "buy" : "sell";
-
                 // Determine trade mode based on account mode and security type
-                // Classic account (okx-unified-account-mode=cash): Spot→"cash", Futures→"cross"
-                // Unified accounts (portfolio/multi_currency/single_currency): All→"cross"
                 var tdMode = GetTradeMode(order.Symbol.SecurityType);
 
-                // Convert LEAN order type to OKX order type
-                string ordType;
-                string price = null;
-
-                switch (order.Type)
+                // Route to appropriate handler based on order type
+                if (IsSpotMarketBuy(order))
                 {
-                    case OrderType.Market:
-                        ordType = "market";
-                        break;
-
-                    case OrderType.Limit:
-                        ordType = "limit";
-                        price = ((LimitOrder)order).LimitPrice.ToStringInvariant();
-                        break;
-
-                    case OrderType.StopMarket:
-                        OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UNSUPPORTED_ORDER_TYPE",
-                            $"StopMarket orders are not supported by OKX v5 API. Use StopLimit instead."));
-                        OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                        {
-                            Status = OrderStatus.Invalid,
-                            Message = "StopMarket orders not supported"
-                        });
-                        return true;  // Binance pattern: always return true
-
-                    case OrderType.StopLimit:
-                        OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UNSUPPORTED_ORDER_TYPE",
-                            $"StopLimit orders require algo order endpoint - not implemented"));
-                        OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                        {
-                            Status = OrderStatus.Invalid,
-                            Message = "StopLimit orders not implemented"
-                        });
-                        return true;  // Binance pattern: always return true
-
-                    default:
-                        var unsupportedMsg = $"Order type {order.Type} is not supported";
-                        OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UNSUPPORTED_ORDER_TYPE", unsupportedMsg));
-                        OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                        {
-                            Status = OrderStatus.Invalid,
-                            Message = unsupportedMsg
-                        });
-                        return true;  // Binance pattern: always return true
+                    return PlaceSpotMarketBuyAsFokLimit(order, instId, tdMode);
                 }
 
-                // IMPORTANT: Add order to cache BEFORE placing via REST API
-                // This prevents race condition where WebSocket update arrives before Submitted event
-                CachedOrderIDs.TryAdd(order.Id, order);
-
-                // Create place order request
-                var request = new Messages.OKXPlaceOrderRequest
-                {
-                    InstrumentId = instId,
-                    TradeMode = tdMode,
-                    Side = side,
-                    OrderType = ordType,
-                    Size = Math.Abs(order.Quantity).ToStringInvariant(),
-                    Price = price,
-                    ClientOrderId = order.Id.ToStringInvariant(),
-                    Tag = string.IsNullOrEmpty(order.Tag) ? "" : order.Tag,
-
-                    // For ALL market orders, always use base currency (e.g., BTC)
-                    // This is consistent and avoids the confusing Gate/OKX pattern where
-                    // market sell would use quote currency - that's a terrible design
-                    TargetCurrency = "base_ccy"
-                };
-
-                // Place order via REST API
-                var result = RestApiClient.PlaceOrder(request);
-
-                // SUCCESS PATH
-                if (result.IsSuccess)
-                {
-                    // Store broker ID
-                    order.BrokerId.Add(result.Data.OrderId);
-
-                    // Send order submitted event
-                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                    {
-                        Status = OrderStatus.Submitted
-                    });
-
-                    Log.Trace($"OKXBaseBrokerage.PlaceOrder(): Order {order.Id} placed successfully, OKX OrderId: {result.Data.OrderId}");
-                    return true;
-                }
-
-                // ERROR PATH - Include full error details
-                var errorMessage = result.GetErrorMessage();
-                var fullMessage = $"Order failed, Order Id: {order.Id} timestamp: {order.Time} " +
-                                 $"quantity: {order.Quantity} symbol: {order.Symbol} - {errorMessage}";
-
-                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                {
-                    Status = OrderStatus.Invalid,
-                    Message = errorMessage  // Specific error reason visible to user
-                });
-
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "ORDER_PLACEMENT_FAILED", fullMessage));
-
-                Log.Error($"OKXBaseBrokerage.PlaceOrder(): {fullMessage}");
-                return true;  // Binance pattern: always return true
+                return PlaceStandardOrder(order, instId, tdMode);
             }
             catch (Exception ex)
             {
                 var message = $"Exception placing order {order.Id}: {ex.Message}";
                 Log.Error($"OKXBaseBrokerage.PlaceOrder(): {message}");
 
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, "ORDER_PLACEMENT_ERROR", message));
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "ORDER_PLACEMENT_ERROR", message));
 
                 OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
                 {
@@ -169,6 +74,174 @@ namespace QuantConnect.Brokerages.OKX
 
                 return true;  // Binance pattern: return true even on exception
             }
+        }
+
+        /// <summary>
+        /// Determines if the order is a Spot market buy order
+        /// These orders require special handling due to OKX's sz parameter semantics
+        /// </summary>
+        private bool IsSpotMarketBuy(Order order)
+        {
+            return order.Type == OrderType.Market
+                && order.Quantity > 0  // Buy direction
+                && order.Symbol.SecurityType == SecurityType.Crypto;
+        }
+
+        // ========================================
+        // SPOT MARKET BUY - FOK LIMIT CONVERSION
+        // ========================================
+
+        /// <summary>
+        /// Converts Spot market buy order to FOK (Fill-or-Kill) limit order.
+        ///
+        /// <para><b>Why this conversion is necessary:</b></para>
+        /// <para>
+        /// OKX Spot market orders have a semantic mismatch with LEAN:
+        /// <list type="bullet">
+        ///   <item>OKX Market BUY (cash mode): sz can be base or quote currency (controlled by tgtCcy)</item>
+        ///   <item>OKX Market BUY (cross/isolated mode): sz is always quote currency (tgtCcy not supported)</item>
+        ///   <item>OKX Market SELL: sz is always base currency</item>
+        ///   <item>LEAN Market Order: Quantity is always in base currency</item>
+        /// </list>
+        /// </para>
+        ///
+        /// <para><b>Solution:</b></para>
+        /// <para>
+        /// Convert all Spot market buy orders to FOK limit orders. FOK limit orders:
+        /// <list type="bullet">
+        ///   <item>sz is always in base currency (matches LEAN's Order.Quantity)</item>
+        ///   <item>Guarantees all-or-nothing execution - no partial fills left on the book</item>
+        ///   <item>Works consistently across all account modes (cash/cross/isolated)</item>
+        /// </list>
+        /// </para>
+        ///
+        /// <para><b>Price calculation:</b></para>
+        /// <para>
+        /// limitPrice = BestAskPrice × (1 + buffer), where buffer defaults to 2%.
+        /// This ensures immediate execution while protecting against excessive slippage.
+        /// </para>
+        /// </summary>
+        private bool PlaceSpotMarketBuyAsFokLimit(Order order, string instId, string tdMode)
+        {
+            // 1. Get BestAsk price via REST API
+            var ticker = RestApiClient.GetTickerInfo(instId);
+            var bestAsk = ticker?.LowestAsk ?? 0m;
+
+            if (bestAsk <= 0)
+            {
+                throw new InvalidOperationException($"No price data available for {instId}");
+            }
+
+            // 2. Calculate limit price with buffer (default 2%)
+            var priceBuffer = DefaultMarketBuyPriceBuffer;
+            var limitPrice = bestAsk * (1 + priceBuffer);
+
+            Log.Trace($"OKXBaseBrokerage.PlaceSpotMarketBuyAsFokLimit(): {instId} bestAsk={bestAsk}, limitPrice={limitPrice} (buffer={priceBuffer:P0})");
+
+            // 3. Add order to cache BEFORE placing
+            CachedOrderIDs.TryAdd(order.Id, order);
+
+            // 4. Build FOK limit order request
+            var request = new Messages.OKXPlaceOrderRequest
+            {
+                InstrumentId = instId,
+                TradeMode = tdMode,
+                Side = "buy",
+                OrderType = "fok",  // Fill-or-Kill
+                Size = Math.Abs(order.Quantity).ToStringInvariant(),
+                Price = limitPrice.ToStringInvariant(),
+                ClientOrderId = order.Id.ToStringInvariant(),
+                Tag = string.IsNullOrEmpty(order.Tag) ? "" : order.Tag
+            };
+
+            // 5. Place order via REST API
+            var result = RestApiClient.PlaceOrder(request);
+
+            if (result.IsSuccess)
+            {
+                order.BrokerId.Add(result.Data.OrderId);
+
+                Log.Trace($"OKXBaseBrokerage.PlaceSpotMarketBuyAsFokLimit(): Converted market buy to FOK limit @ {limitPrice} " +
+                         $"(bestAsk={bestAsk}, buffer={priceBuffer:P0}) for {order.Quantity} {order.Symbol.ID}({order.Symbol.SecurityType}), OKX OrderId: {result.Data.OrderId}");
+                return true;
+            }
+
+            // Error - throw to let outer catch handle
+            throw new InvalidOperationException($"FOK limit @ {limitPrice} failed: {result.GetErrorMessage()}");
+        }
+
+        // ========================================
+        // STANDARD ORDER PLACEMENT
+        // ========================================
+
+        /// <summary>
+        /// Places a standard order (Limit, Market Sell, Futures/Swap orders)
+        /// For these order types, sz is always in base currency or contract units
+        /// </summary>
+        private bool PlaceStandardOrder(Order order, string instId, string tdMode)
+        {
+            // Determine order side
+            var side = order.Quantity > 0 ? "buy" : "sell";
+
+            // Convert LEAN order type to OKX order type
+            string ordType;
+            string price = null;
+
+            switch (order.Type)
+            {
+                case OrderType.Market:
+                    ordType = "market";
+                    break;
+
+                case OrderType.Limit:
+                    ordType = "limit";
+                    price = ((LimitOrder)order).LimitPrice.ToStringInvariant();
+                    break;
+
+                case OrderType.StopMarket:
+                    throw new NotSupportedException("StopMarket orders are not supported by OKX v5 API. Use StopLimit instead.");
+
+                case OrderType.StopLimit:
+                    throw new NotSupportedException("StopLimit orders require algo order endpoint - not implemented");
+
+                default:
+                    throw new NotSupportedException($"Order type {order.Type} is not supported");
+            }
+
+            // Add order to cache BEFORE placing via REST API
+            CachedOrderIDs.TryAdd(order.Id, order);
+
+            // Create place order request
+            var request = new Messages.OKXPlaceOrderRequest
+            {
+                InstrumentId = instId,
+                TradeMode = tdMode,
+                Side = side,
+                OrderType = ordType,
+                Size = Math.Abs(order.Quantity).ToStringInvariant(),
+                Price = price,
+                ClientOrderId = order.Id.ToStringInvariant(),
+                Tag = string.IsNullOrEmpty(order.Tag) ? "" : order.Tag
+                // Note: tgtCcy removed - not needed for Limit orders, Market Sell, or Futures/Swap
+            };
+
+            // Place order via REST API
+            var result = RestApiClient.PlaceOrder(request);
+
+            if (result.IsSuccess)
+            {
+                order.BrokerId.Add(result.Data.OrderId);
+
+                var orderDetails = order.Type == OrderType.Limit
+                    ? $"{order.Type} {order.Direction} {order.Quantity} {order.Symbol.ID}({order.Symbol.SecurityType}) @ {((LimitOrder)order).LimitPrice}"
+                    : $"{order.Type} {order.Direction} {order.Quantity} {order.Symbol.ID}({order.Symbol.SecurityType})";
+
+                Log.Trace($"OKXBaseBrokerage.PlaceStandardOrder(): Order {order.Id} placed successfully - {orderDetails}, OKX OrderId: {result.Data.OrderId}");
+                return true;
+            }
+
+            // Error - throw to let outer catch handle
+            throw new InvalidOperationException($"Order failed: {result.GetErrorMessage()}");
         }
 
 
@@ -208,18 +281,9 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                // OKX v5 supports amending orders (price and quantity modification)
-                // Check if order has broker ID
                 if (order.BrokerId.Count == 0)
                 {
-                    var errorMsg = "Cannot update order: No broker ID found";
-                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UPDATE_ORDER_FAILED", errorMsg));
-                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                    {
-                        Status = OrderStatus.Invalid,
-                        Message = errorMsg
-                    });
-                    return true;  // Binance pattern: always return true
+                    throw new InvalidOperationException("Cannot update order: No broker ID found");
                 }
 
                 var ordId = order.BrokerId[0];
@@ -246,33 +310,20 @@ namespace QuantConnect.Brokerages.OKX
                 // Amend order via REST API
                 var result = RestApiClient.AmendOrder(request);
 
-                // SUCCESS PATH
                 if (result.IsSuccess)
                 {
-                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                    {
-                        Status = order.Status,
-                        Message = "Order updated"
-                    });
                     Log.Trace($"OKXBaseBrokerage.UpdateOrder(): Order {order.Id} (OKX: {ordId}) updated successfully");
                     return true;
                 }
 
-                // ERROR PATH - Include full error details
-                var errorMessage = result.GetErrorMessage();
-                var fullMessage = $"Update failed for Order {order.Id} (OKX: {ordId}) - {errorMessage}";
-
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "ORDER_UPDATE_FAILED", fullMessage));
-                Log.Error($"OKXBaseBrokerage.UpdateOrder(): {fullMessage}");
-
-                return true;  // Binance pattern: always return true
+                throw new InvalidOperationException($"Update failed: {result.GetErrorMessage()}");
             }
             catch (Exception ex)
             {
                 var message = $"Exception updating order {order.Id}: {ex.Message}";
-                Log.Error($"OKXBaseBrokerage.UpdateOrder(): {message}");
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, "ORDER_UPDATE_ERROR", message));
-                return true;  // Binance pattern: return true even on exception
+                Log.Trace($"OKXBaseBrokerage.UpdateOrder(): {message}");
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "ORDER_UPDATE_ERROR", message));
+                return true;
             }
         }
 
@@ -286,17 +337,9 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                // Check if order has broker ID
                 if (order.BrokerId.Count == 0)
                 {
-                    var errorMsg = "Cannot cancel order: No broker ID found";
-                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "CANCEL_ORDER_FAILED", errorMsg));
-                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                    {
-                        Status = OrderStatus.Invalid,
-                        Message = errorMsg
-                    });
-                    return true;  // Binance pattern: always return true
+                    throw new InvalidOperationException("Cannot cancel order: No broker ID found");
                 }
 
                 var ordId = order.BrokerId[0];
@@ -312,33 +355,20 @@ namespace QuantConnect.Brokerages.OKX
                 // Cancel order via REST API
                 var result = RestApiClient.CancelOrder(request);
 
-                // SUCCESS PATH
                 if (result.IsSuccess)
                 {
-                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                    {
-                        Status = OrderStatus.Canceled,
-                        Message = "Order canceled"
-                    });
                     Log.Trace($"OKXBaseBrokerage.CancelOrder(): Order {order.Id} (OKX: {ordId}) canceled successfully");
                     return true;
                 }
 
-                // ERROR PATH - Include full error details
-                var errorMessage = result.GetErrorMessage();
-                var fullMessage = $"Cancel failed for Order {order.Id} (OKX: {ordId}) - {errorMessage}";
-
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "ORDER_CANCEL_FAILED", fullMessage));
-                Log.Error($"OKXBaseBrokerage.CancelOrder(): {fullMessage}");
-
-                return true;  // Binance pattern: always return true
+                throw new InvalidOperationException($"Cancel failed: {result.GetErrorMessage()}");
             }
             catch (Exception ex)
             {
                 var message = $"Exception canceling order {order.Id}: {ex.Message}";
-                Log.Error($"OKXBaseBrokerage.CancelOrder(): {message}");
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, "ORDER_CANCEL_ERROR", message));
-                return true;  // Binance pattern: return true even on exception
+                Log.Trace($"OKXBaseBrokerage.CancelOrder(): {message}");
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "ORDER_CANCEL_ERROR", message));
+                return true;
             }
         }
     }
