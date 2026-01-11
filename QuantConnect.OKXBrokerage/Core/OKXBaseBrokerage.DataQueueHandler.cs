@@ -32,18 +32,6 @@ namespace QuantConnect.Brokerages.OKX
     public abstract partial class OKXBaseBrokerage
     {
         // ========================================
-        // BALANCE CACHE
-        // ========================================
-
-        /// <summary>
-        /// Cache for account balances (updated via WebSocket)
-        /// Key: Currency symbol (e.g., "USDT", "BTC")
-        /// Value: Available balance amount
-        /// Note: Subclasses populate this cache in their HandleBalancesMessage/OnBalanceUpdate implementations
-        /// </summary>
-        protected readonly ConcurrentDictionary<string, decimal> _balanceCache = new();
-
-        // ========================================
         // ORDER BOOK MANAGEMENT
         // ========================================
 

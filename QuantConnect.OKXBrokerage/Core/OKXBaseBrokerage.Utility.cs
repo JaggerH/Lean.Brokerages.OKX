@@ -66,21 +66,6 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Generates HMAC-SHA512 signature (legacy, for Gate.io compatibility)
-        /// </summary>
-        /// <param name="message">Message to sign</param>
-        /// <param name="secret">Secret key</param>
-        /// <returns>Hex-encoded signature string</returns>
-        public static string GenerateHmacSha512Signature(string message, string secret)
-        {
-            using (var hmac = new HMACSHA512(Encoding.UTF8.GetBytes(secret)))
-            {
-                var hashBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(message));
-                return ByteArrayToHexString(hashBytes);
-            }
-        }
-
-        /// <summary>
         /// Converts byte array to hex string
         /// </summary>
         /// <param name="bytes">Byte array to convert</param>
@@ -96,38 +81,8 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         // ========================================
-        // ORDER TYPE CONVERSIONS
+        // ORDER STATUS CONVERSION
         // ========================================
-
-        /// <summary>
-        /// Converts LEAN OrderType to OKX order type string
-        /// </summary>
-        /// <param name="orderType">LEAN order type</param>
-        /// <returns>OKX order type</returns>
-        public static string ConvertOrderType(OrderType orderType)
-        {
-            return orderType switch
-            {
-                OrderType.Limit => "limit",
-                OrderType.Market => "market",
-                _ => throw new NotSupportedException($"Unsupported order type: {orderType}")
-            };
-        }
-
-        /// <summary>
-        /// Converts LEAN Order direction to OKX side string
-        /// </summary>
-        /// <param name="direction">Order direction</param>
-        /// <returns>"buy" or "sell"</returns>
-        public static string ConvertOrderDirection(OrderDirection direction)
-        {
-            return direction switch
-            {
-                OrderDirection.Buy => "buy",
-                OrderDirection.Sell => "sell",
-                _ => throw new ArgumentException($"Invalid direction: {direction}")
-            };
-        }
 
         /// <summary>
         /// Converts OKX order status to LEAN OrderStatus
@@ -150,21 +105,6 @@ namespace QuantConnect.Brokerages.OKX
                 "canceled" => OrderStatus.Canceled,
                 "mmp_canceled" => OrderStatus.Canceled,
                 _ => OrderStatus.None
-            };
-        }
-
-        /// <summary>
-        /// Gets the price to submit for an order based on order type
-        /// </summary>
-        /// <param name="order">LEAN order</param>
-        /// <returns>Price to submit</returns>
-        public static decimal GetOrderPrice(QuantConnect.Orders.Order order)
-        {
-            return order.Type switch
-            {
-                OrderType.Limit => ((LimitOrder)order).LimitPrice,
-                OrderType.Market => 0, // Market orders don't need price on OKX
-                _ => throw new NotSupportedException($"Unsupported order type: {order.Type}")
             };
         }
 
@@ -212,91 +152,6 @@ namespace QuantConnect.Brokerages.OKX
         public static long DateTimeToUnixMilliseconds(DateTime dateTime)
         {
             return new DateTimeOffset(dateTime).ToUnixTimeMilliseconds();
-        }
-
-        // ========================================
-        // SYMBOL CONVERSIONS
-        // ========================================
-
-        /// <summary>
-        /// Converts LEAN Symbol format to OKX format
-        /// Example: BTCUSDT -> BTC_USDT
-        /// </summary>
-        /// <param name="leanSymbol">LEAN symbol string</param>
-        /// <returns>OKX symbol format</returns>
-        public static string ConvertToOKXSymbol(string leanSymbol)
-        {
-            // For most symbols, insert underscore before "USDT" or "BTC"
-            // This is a simplified version - production code should use SymbolMapper
-            if (leanSymbol.EndsWith("USDT"))
-            {
-                return leanSymbol.Replace("USDT", "_USDT");
-            }
-            else if (leanSymbol.EndsWith("BTC"))
-            {
-                return leanSymbol.Replace("BTC", "_BTC");
-            }
-
-            return leanSymbol;
-        }
-
-        /// <summary>
-        /// Converts OKX symbol format to LEAN format
-        /// Example: BTC_USDT -> BTCUSDT
-        /// </summary>
-        /// <param name="okxSymbol">OKX symbol string</param>
-        /// <returns>LEAN symbol format</returns>
-        public static string ConvertToLeanSymbol(string okxSymbol)
-        {
-            return okxSymbol.Replace("_", "");
-        }
-
-        // ========================================
-        // RESOLUTION CONVERSIONS
-        // ========================================
-
-        /// <summary>
-        /// Converts LEAN Resolution to OKX candlestick interval string
-        /// </summary>
-        /// <param name="resolution">LEAN Resolution</param>
-        /// <returns>OKX interval string</returns>
-        public static string ConvertResolution(Resolution resolution)
-        {
-            return resolution switch
-            {
-                Resolution.Second => "10s",
-                Resolution.Minute => "1m",
-                Resolution.Hour => "1h",
-                Resolution.Daily => "1d",
-                _ => throw new ArgumentException($"Unsupported resolution: {resolution}")
-            };
-        }
-
-        // ========================================
-        // VALIDATION HELPERS
-        // ========================================
-
-        /// <summary>
-        /// Validates minimum order quantity for OKX
-        /// </summary>
-        /// <param name="quantity">Order quantity</param>
-        /// <returns>True if valid</returns>
-        public static bool ValidateMinimumOrderQuantity(decimal quantity)
-        {
-            // OKX minimum varies by symbol
-            // This is a simplified version
-            return quantity >= 0.0001m;
-        }
-
-        /// <summary>
-        /// Validates minimum order value (10 USDT for Spot)
-        /// </summary>
-        /// <param name="quantity">Order quantity</param>
-        /// <param name="price">Order price</param>
-        /// <returns>True if valid</returns>
-        public static bool ValidateMinimumOrderValue(decimal quantity, decimal price)
-        {
-            return quantity * price >= 10m;
         }
 
         // ========================================
