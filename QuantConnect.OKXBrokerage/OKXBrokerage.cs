@@ -78,15 +78,6 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Gets all holdings for the account
-        /// </summary>
-        /// <returns>The current holdings from the account</returns>
-        public override List<Holding> GetAccountHoldings()
-        {
-            return RestApiClient.GetAccountHoldings();
-        }
-
-        /// <summary>
         /// Gets the current cash balance for each currency held in the brokerage account
         /// </summary>
         /// <returns>The current cash balance for each currency available for trading</returns>
@@ -186,15 +177,6 @@ namespace QuantConnect.Brokerages.OKX
                     "PrivateChannelSubscription",
                     $"Failed to subscribe to private channels: {ex.Message}"));
             }
-        }
-
-        /// <summary>
-        /// Unsubscribes from private channels
-        /// </summary>
-        protected override void UnsubscribePrivateChannels()
-        {
-            // Unsubscribe from private channels
-            Log.Trace("OKXBrokerage.UnsubscribePrivateChannels(): Unsubscribed from private channels");
         }
 
         /// <summary>

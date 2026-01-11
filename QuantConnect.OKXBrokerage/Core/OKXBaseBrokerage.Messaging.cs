@@ -393,22 +393,6 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Maps OKX order state to LEAN OrderStatus
-        /// </summary>
-        protected virtual OrderStatus MapOrderState(string okxState)
-        {
-            return okxState?.ToLowerInvariant() switch
-            {
-                "live" => OrderStatus.Submitted,
-                "partially_filled" => OrderStatus.PartiallyFilled,
-                "filled" => OrderStatus.Filled,
-                "canceled" => OrderStatus.Canceled,
-                "canceling" => OrderStatus.CancelPending,
-                _ => OrderStatus.None
-            };
-        }
-
-        /// <summary>
         /// Handles account channel data push
         /// Channel: account
         /// Data: Array of account balance updates

@@ -131,6 +131,12 @@ namespace QuantConnect.Brokerages.OKX
 
         /// <summary>
         /// Converts OKX order status to LEAN OrderStatus
+        /// OKX v5 API order states:
+        /// - canceled: Order canceled successfully
+        /// - live: Waiting to be filled
+        /// - partially_filled: Partially filled
+        /// - filled: Completely filled
+        /// - mmp_canceled: Auto-canceled by Market Maker Protection
         /// </summary>
         /// <param name="okxStatus">OKX status string</param>
         /// <returns>LEAN OrderStatus</returns>
@@ -138,10 +144,11 @@ namespace QuantConnect.Brokerages.OKX
         {
             return okxStatus?.ToLowerInvariant() switch
             {
-                "open" => OrderStatus.Submitted,
-                "finished" => OrderStatus.Filled,
-                "cancelled" => OrderStatus.Canceled,
-                "closed" => OrderStatus.Filled,
+                "live" => OrderStatus.Submitted,
+                "partially_filled" => OrderStatus.PartiallyFilled,
+                "filled" => OrderStatus.Filled,
+                "canceled" => OrderStatus.Canceled,
+                "mmp_canceled" => OrderStatus.Canceled,
                 _ => OrderStatus.None
             };
         }
@@ -485,9 +492,6 @@ namespace QuantConnect.Brokerages.OKX
         protected void TriggerReconnect(string code, string reason)
         {
             Log.Error($"{GetType().Name}.TriggerReconnect(): [{code}] {reason}");
-
-            // Mark that we need to send Reconnect notification on next successful auth
-            _reconnectNotificationPending = true;
 
             // Notify LEAN engine about disconnection to start reconnect timer
             OnMessage(new BrokerageMessageEvent(

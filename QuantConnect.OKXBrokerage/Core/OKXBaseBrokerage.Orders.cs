@@ -45,6 +45,9 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
+                // Rate limit order operations
+                OrderRateLimiter.WaitToProceed();
+
                 // Convert LEAN symbol to OKX instrument ID
                 var instId = _symbolMapper.GetBrokerageSymbol(order.Symbol);
 
@@ -281,6 +284,9 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
+                // Rate limit order operations
+                OrderRateLimiter.WaitToProceed();
+
                 if (order.BrokerId.Count == 0)
                 {
                     throw new InvalidOperationException("Cannot update order: No broker ID found");
@@ -337,6 +343,9 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
+                // Rate limit order operations
+                OrderRateLimiter.WaitToProceed();
+
                 if (order.BrokerId.Count == 0)
                 {
                     throw new InvalidOperationException("Cannot cancel order: No broker ID found");

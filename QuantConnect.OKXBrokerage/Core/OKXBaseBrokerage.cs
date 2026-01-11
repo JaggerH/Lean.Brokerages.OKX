@@ -46,7 +46,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Maximum symbols per WebSocket connection
         /// </summary>
-        protected const int MaximumSymbolsPerConnection = 512;
+        protected const int MaximumSymbolsPerConnection = 120;
 
         // ========================================
         // PROTECTED FIELDS
@@ -79,11 +79,6 @@ namespace QuantConnect.Brokerages.OKX
         protected virtual RateGate OrderRateLimiter { get; } = new(10, TimeSpan.FromSeconds(1));
 
         /// <summary>
-        /// Track pending orders by WebSocket request_id
-        /// </summary>
-        protected readonly System.Collections.Concurrent.ConcurrentDictionary<string, Order> _pendingOrdersByRequestId = new();
-
-        /// <summary>
         /// Track cumulative fill quantities
         /// </summary>
         protected readonly System.Collections.Concurrent.ConcurrentDictionary<int, decimal> _fills = new();
@@ -104,12 +99,6 @@ namespace QuantConnect.Brokerages.OKX
         /// Login state tracking
         /// </summary>
         protected volatile bool _isAuthenticated = false;
-
-        /// <summary>
-        /// Tracks whether a Reconnect notification needs to be sent on next successful authentication.
-        /// Set to true when Disconnect is sent, reset to false after Reconnect is sent.
-        /// </summary>
-        protected volatile bool _reconnectNotificationPending = false;
 
         /// <summary>
         /// Keep-alive timer for WebSocket heartbeat (Binance pattern)
@@ -146,11 +135,6 @@ namespace QuantConnect.Brokerages.OKX
         /// Note: REST API is always available after initialization, but WebSocket is needed for OrderEvents
         /// </summary>
         public override bool IsConnected => WebSocket?.IsOpen == true;
-
-        /// <summary>
-        /// Gets the account base currency (USDT for OKX)
-        /// </summary>
-        public new string AccountBaseCurrency => "USDT";
 
         // ========================================
         // CONSTRUCTORS
@@ -365,35 +349,6 @@ namespace QuantConnect.Brokerages.OKX
         protected abstract void SubscribePrivateChannels();
 
         /// <summary>
-        /// Sends a private channel subscription request
-        /// This method is called by subclasses to send subscription requests
-        /// </summary>
-        /// <param name="channel">Channel name (e.g., "spot.orders", "futures.balances")</param>
-        /// <param name="payload">Subscription payload (contract names or parameters)</param>
-        protected void SendPrivateChannelSubscription(string channel, string[] payload)
-        {
-            // Generate authentication
-            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            var auth = RestApiClient.GenerateWebSocketAuth(channel, "subscribe", timestamp);
-
-            // Build subscription request
-            var subscribeRequest = new
-            {
-                time = timestamp,
-                channel = channel,
-                @event = "subscribe",
-                payload = payload,
-                auth = auth
-            };
-
-            // Send request
-            var message = JsonConvert.SerializeObject(subscribeRequest);
-            WebSocket.Send(message);
-
-            Log.Trace($"{GetType().Name}.SendPrivateChannelSubscription(): Sent subscription request for {channel}");
-        }
-
-        /// <summary>
         /// Disconnects from the broker
         /// </summary>
         public override void Disconnect()
@@ -411,59 +366,6 @@ namespace QuantConnect.Brokerages.OKX
             _isAuthenticated = false;
 
             Log.Trace($"{GetType().Name}.Disconnect(): Disconnected successfully");
-        }
-
-        /// <summary>
-        /// Unsubscribes from private channels
-        /// </summary>
-        protected abstract void UnsubscribePrivateChannels();
-
-        /// <summary>
-        /// Unsubscribes from a specific channel
-        /// Default implementation handles both market data and private channels
-        /// Subclasses can override if they need special handling
-        /// </summary>
-        /// <param name="channel">Channel name (e.g., "spot.trades", "futures.orders")</param>
-        /// <param name="payload">Payload parameter (currency pair, contract, "!all", or null for empty payload)</param>
-        protected virtual void UnsubscribeChannel(string channel, string payload)
-        {
-            try
-            {
-                // Check WebSocket availability before attempting to unsubscribe
-                // This prevents NullReferenceException during concurrent disconnect/reconnect
-                if (WebSocket == null || !WebSocket.IsOpen)
-                {
-                    Log.Trace($"{GetType().Name}.UnsubscribeChannel({channel}): WebSocket not available, skipping unsubscribe");
-                    return;
-                }
-
-                // Construct payload array based on parameter
-                // null → empty array (for account-level channels like balances)
-                // non-null → single-element array (for symbol-specific or "!all" channels)
-                var payloadArray = payload == null ? Array.Empty<string>() : new[] { payload };
-
-                var unsubscribeRequest = new
-                {
-                    time = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    channel = channel,
-                    @event = "unsubscribe",
-                    payload = payloadArray
-                };
-
-                var message = JsonConvert.SerializeObject(unsubscribeRequest);
-
-                // Double-check WebSocket is still available before sending
-                // Guards against race condition where WebSocket closes between checks
-                if (WebSocket != null && WebSocket.IsOpen)
-                {
-                    WebSocket.Send(message);
-                    Log.Trace($"{GetType().Name}.UnsubscribeChannel(): Unsubscribed from {channel}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.UnsubscribeChannel({channel}): Error: {ex}");
-            }
         }
 
         /// <summary>
@@ -512,10 +414,16 @@ namespace QuantConnect.Brokerages.OKX
 
         /// <summary>
         /// Gets account holdings
+        /// Following Binance pattern: try API first, fallback to base class cached data
         /// </summary>
         public override List<Holding> GetAccountHoldings()
         {
-            return RestApiClient.GetAccountHoldings();
+            var holdings = RestApiClient.GetAccountHoldings();
+            if (holdings.Count > 0)
+            {
+                return holdings;
+            }
+            return base.GetAccountHoldings(_job?.BrokerageData, _algorithm?.Securities.Values);
         }
 
         /// <summary>

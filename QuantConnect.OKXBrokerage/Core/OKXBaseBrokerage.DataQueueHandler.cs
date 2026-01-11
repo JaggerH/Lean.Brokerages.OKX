@@ -141,7 +141,7 @@ namespace QuantConnect.Brokerages.OKX
             /// Channel for message passing between WebSocket handler and processor
             /// Replaces CachedUpdates - Channel naturally buffers messages
             /// </summary>
-            public System.Threading.Channels.Channel<Messages.OrderBookUpdate> MessageChannel { get; set; }
+            public Channel<Messages.OrderBookUpdate> MessageChannel { get; set; }
 
             /// <summary>
             /// Currency pair for this order book (e.g., BTC_USDT)
