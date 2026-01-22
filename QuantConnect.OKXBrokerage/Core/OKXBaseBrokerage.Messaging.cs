@@ -674,11 +674,7 @@ namespace QuantConnect.Brokerages.OKX
             try
             {
                 // Get LEAN symbol
-                Log.Trace($"{GetType().Name}.HandleOrderBookUpdate(): Processing {action} for instId='{orderBook.InstrumentId ?? "NULL"}'");
-
                 var securityType = GetSecurityType(orderBook.InstrumentId);
-                Log.Trace($"{GetType().Name}.HandleOrderBookUpdate(): Detected securityType={securityType}");
-
                 var symbol = _symbolMapper.GetLeanSymbol(orderBook.InstrumentId, securityType, Market.OKX);
 
                 var time = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(orderBook.Timestamp)).UtcDateTime;
