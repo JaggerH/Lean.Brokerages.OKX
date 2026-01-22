@@ -451,13 +451,14 @@ namespace QuantConnect.Brokerages.OKX
                 // Initialize order book context for this symbol (if not already exists)
                 var orderBookContext = _orderBookContexts.GetOrAdd(symbol, _ =>
                 {
-                    var newContext = new OrderBookContext(this, symbol, brokerageSymbol, _orderBookDepth);
+                    var newContext = new OrderBookContext(this, symbol, brokerageSymbol);
                     _orderBooks[symbol] = newContext.OrderBook;
                     return newContext;
                 });
 
                 // OKX v5 API subscription format: { "op": "subscribe", "args": [ { "channel": "...", "instId": "..." } ] }
-                // Subscribe to books5 channel (5-level orderbook depth)
+                // Subscribe to books channel (400-level orderbook depth)
+                // books: 首次推400档快照数据，以后增量推送，每100毫秒推送一次变化的数据
                 var bookSubscribeMessage = new Messages.OKXWebSocketMessage
                 {
                     Operation = "subscribe",
@@ -465,7 +466,7 @@ namespace QuantConnect.Brokerages.OKX
                     {
                         new Messages.OKXWebSocketChannel
                         {
-                            Channel = "books5",
+                            Channel = "books",
                             InstrumentId = brokerageSymbol
                         }
                     }
@@ -487,7 +488,7 @@ namespace QuantConnect.Brokerages.OKX
                 };
                 webSocket.Send(JsonConvert.SerializeObject(tradesSubscribeMessage));
 
-                Log.Trace($"{GetType().Name}.Subscribe(): Subscribed {symbol} to books5 and trades");
+                Log.Trace($"{GetType().Name}.Subscribe(): Subscribed {symbol} to books (400-level) and trades");
                 return true;
             }
             catch (Exception ex)
@@ -511,7 +512,7 @@ namespace QuantConnect.Brokerages.OKX
                 var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
                 // OKX v5 API unsubscription format
-                // Unsubscribe from books5 channel
+                // Unsubscribe from books channel
                 var bookUnsubscribeMessage = new Messages.OKXWebSocketMessage
                 {
                     Operation = "unsubscribe",
@@ -519,7 +520,7 @@ namespace QuantConnect.Brokerages.OKX
                     {
                         new Messages.OKXWebSocketChannel
                         {
-                            Channel = "books5",
+                            Channel = "books",
                             InstrumentId = brokerageSymbol
                         }
                     }
@@ -567,7 +568,7 @@ namespace QuantConnect.Brokerages.OKX
                 };
                 webSocket.Send(JsonConvert.SerializeObject(tradesUnsubscribeMessage));
 
-                Log.Trace($"{GetType().Name}.Unsubscribe(): Unsubscribed {symbol} from books5 and trades");
+                Log.Trace($"{GetType().Name}.Unsubscribe(): Unsubscribed {symbol} from books and trades");
                 return true;
             }
             catch (Exception ex)

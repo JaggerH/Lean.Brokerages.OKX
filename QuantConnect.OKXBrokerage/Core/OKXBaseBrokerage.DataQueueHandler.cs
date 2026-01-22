@@ -41,9 +41,10 @@ namespace QuantConnect.Brokerages.OKX
         protected readonly ConcurrentDictionary<Symbol, OKXOrderBook> _orderBooks = new();
 
         /// <summary>
-        /// Order book depth configuration (default: 100 levels)
+        /// Order book depth configuration for books channel (400 levels)
+        /// Matches OKX v5 API books channel specification
         /// </summary>
-        protected int _orderBookDepth = 100;
+        protected int _orderBookDepth = 400;
 
         /// <summary>
         /// Order book state management (for incremental update synchronization)
@@ -162,11 +163,6 @@ namespace QuantConnect.Brokerages.OKX
             public Task ConsumerTask { get; set; }
 
             /// <summary>
-            /// Initialization task (async snapshot fetch)
-            /// </summary>
-            public Task InitializationTask { get; set; }
-
-            /// <summary>
             /// Maximum number of updates to cache during initialization
             /// </summary>
             public const int MaxCacheSize = 100;
@@ -174,12 +170,12 @@ namespace QuantConnect.Brokerages.OKX
             /// <summary>
             /// Constructor
             /// </summary>
-            public OrderBookContext(OKXBaseBrokerage brokerage, Symbol symbol, string currencyPair, int maxDepth = 100)
+            public OrderBookContext(OKXBaseBrokerage brokerage, Symbol symbol, string currencyPair)
             {
                 Brokerage = brokerage;
                 Symbol = symbol;
                 CurrencyPair = currencyPair;
-                OrderBook = new OKXOrderBook(symbol, maxDepth);
+                OrderBook = new OKXOrderBook(symbol);
                 State = OrderBookState.Initializing;
                 LastUpdateId = 0;
                 BaseId = 0;
@@ -196,7 +192,7 @@ namespace QuantConnect.Brokerages.OKX
 
                 CancellationToken = new CancellationTokenSource();
 
-                // Start consumer task immediately (will wait for State change)
+                // Start consumer task immediately (will wait for State change to Synchronized via WebSocket snapshot)
                 ConsumerTask = System.Threading.Tasks.Task.Run(() => Brokerage.ProcessOrderBookUpdatesAsync(this))
                     .ContinueWith(task =>
                     {
@@ -206,19 +202,8 @@ namespace QuantConnect.Brokerages.OKX
                         }
                     }, System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted);
 
-                // Start async initialization (does not block subscription flow)
-                InitializationTask = System.Threading.Tasks.Task.Run(() => Brokerage.InitializeOrderBookAsync(this))
-                    .ContinueWith(task =>
-                    {
-                        if (task.IsFaulted)
-                        {
-                            Log.Error($"OKXBaseBrokerage.OrderBookContext: Initialization task faulted for {Symbol}: {task.Exception?.GetBaseException()?.Message}");
-                            lock (Lock)
-                            {
-                                State = OrderBookState.Error;
-                            }
-                        }
-                    }, System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted);
+                // Note: OrderBook initialization now happens via WebSocket snapshot (action="snapshot")
+                // No need for separate REST API snapshot fetch
             }
         }
 
@@ -330,7 +315,7 @@ namespace QuantConnect.Brokerages.OKX
             // Add to aggregator
             var enumerator = _aggregator.Add(dataConfig, newDataAvailableHandler);
 
-            // Deleokx to SubscriptionManager (triggers Subscribe callback synchronously)
+            // Delegate to SubscriptionManager (triggers Subscribe callback synchronously)
             SubscriptionManager.Subscribe(dataConfig);
 
             Log.Trace($"{GetType().Name}.Subscribe(): Subscribed {dataConfig.Symbol} via SubscriptionManager");
@@ -351,7 +336,7 @@ namespace QuantConnect.Brokerages.OKX
 
             Log.Trace($"{GetType().Name}.Unsubscribe(): {dataConfig.Symbol}");
 
-            // Deleokx to SubscriptionManager (triggers Unsubscribe callback)
+            // Delegate to SubscriptionManager (triggers Unsubscribe callback)
             SubscriptionManager.Unsubscribe(dataConfig);
 
             Log.Trace($"{GetType().Name}.Unsubscribe(): Unsubscribed {dataConfig.Symbol} via SubscriptionManager");

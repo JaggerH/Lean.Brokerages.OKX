@@ -587,35 +587,6 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         }
 
         /// <summary>
-        /// Gets order book snapshot with sequence ID via REST API
-        /// Used to initialize the local order book for incremental updates
-        /// Spot: https://www.okx.io/docs/developers/apiv4/en/#retrieve-order-book
-        /// Futures: https://www.okx.io/docs/developers/futures/en/#futures-order-book
-        /// </summary>
-        /// <param name="currencyPair">The currency pair (e.g., BTC_USDT)</param>
-        /// <param name="limit">Order book depth (default 20, max 100)</param>
-        /// <returns>Order book snapshot with base ID, or null if request fails</returns>
-        public virtual OrderBookSnapshot GetOrderBookSnapshot(string currencyPair, int limit = 20)
-        {
-            var queryParams = new List<string>
-            {
-                $"{SymbolParameterName}={currencyPair}",
-                $"limit={limit}",
-                "with_id=true"  // Critical: request the order book ID for sequence validation
-            };
-
-            var queryString = string.Join("&", queryParams);
-            var snapshot = Get<OrderBookSnapshot>("order_book", queryString, defaultValue: null);
-
-            if (snapshot != null && snapshot.Id == 0)
-            {
-                Log.Error("OKXBaseRestApiClient.GetOrderBookSnapshot(): snapshot ID is 0, which is unexpected");
-            }
-
-            return snapshot;
-        }
-
-        /// <summary>
         /// Gets ticker information for a specific currency pair via REST API
         /// Spot: https://www.okx.io/docs/developers/apiv4/en/#retrieve-ticker-information
         /// Futures: https://www.okx.io/docs/developers/futures/en/#list-futures-tickers

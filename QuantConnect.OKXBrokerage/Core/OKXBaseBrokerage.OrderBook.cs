@@ -36,7 +36,7 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         protected void ApplyOrderBookUpdate(OrderBookContext context, Messages.OrderBookUpdate update)
         {
-            // Deleokx to OKXOrderBook for incremental update logic
+            // Delegate to OKXOrderBook for incremental update logic
             context.OrderBook.ApplyIncrementalUpdate(update.Bids, update.Asks);
 
             // Update sequence ID and timestamp
@@ -85,58 +85,6 @@ namespace QuantConnect.Brokerages.OKX
             catch (Exception ex)
             {
                 Log.Error($"{GetType().Name}.OnBestBidAskUpdated(): {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Initializes an order book asynchronously
-        /// Fetches REST snapshot and applies it, then lets consumer handle incremental updates
-        /// </summary>
-        protected async Task InitializeOrderBookAsync(OrderBookContext context)
-        {
-            try
-            {
-                // Give WebSocket time to receive and buffer updates in Channel
-                await Task.Delay(500);
-
-                // Fetch REST API snapshot
-                var snapshot = RestApiClient.GetOrderBookSnapshot(context.CurrencyPair, 100);
-                if (snapshot == null)
-                {
-                    Log.Error($"{GetType().Name}.InitializeOrderBookAsync(): Failed to get snapshot for {context.Symbol}");
-                    lock (context.Lock)
-                    {
-                        context.State = OrderBookState.Error;
-                    }
-                    return;
-                }
-
-                // Apply snapshot to order book
-                lock (context.Lock)
-                {
-                    // Unsubscribe from events during rebuild
-                    context.OrderBook.BestBidAskUpdated -= OnBestBidAskUpdated;
-
-                    // Deleokx to OKXOrderBook for full snapshot logic (includes Clear, Update, and Trigger)
-                    context.OrderBook.ApplyFullSnapshot(snapshot.Bids, snapshot.Asks);
-
-                    // Update sequence tracking
-                    context.BaseId = snapshot.Id;
-                    context.LastUpdateId = snapshot.Id;
-                    context.LastUpdateTime = DateTime.UtcNow;
-
-                    // Mark as synchronized - consumer will now process buffered Channel messages
-                    context.State = OrderBookState.Synchronized;
-                    context.OrderBook.BestBidAskUpdated += OnBestBidAskUpdated;
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.InitializeOrderBookAsync(): Error for {context.Symbol}: {ex.Message}");
-                lock (context.Lock)
-                {
-                    context.State = OrderBookState.Error;
-                }
             }
         }
 
@@ -196,38 +144,6 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Reinitializes an order book synchronously after detecting a sequence gap
-        /// BLOCKS the calling consumer thread to prevent message loss during reinitialization
-        /// This is intentional design: acts as a barrier to ensure OrderBook consistency
-        /// </summary>
-        protected void ReinitializeOrderBookSync(OrderBookContext context)
-        {
-            try
-            {
-                lock (context.Lock)
-                {
-                    context.OrderBook.BestBidAskUpdated -= OnBestBidAskUpdated;
-                    context.OrderBook.Clear();
-                    context.State = OrderBookState.Initializing;
-                    context.LastUpdateId = 0;
-                    context.BaseId = 0;
-                    context.LastUpdateTime = DateTime.UtcNow;
-                }
-
-                // Call async initialization and wait synchronously (blocks consumer)
-                InitializeOrderBookAsync(context).GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.ReinitializeOrderBookSync(): Error for {context.Symbol}: {ex.Message}");
-                lock (context.Lock)
-                {
-                    context.State = OrderBookState.Error;
-                }
-            }
-        }
-
-        /// <summary>
         /// Consumer task that processes order book updates from the channel
         /// Single-threaded per symbol, runs for the lifetime of the OrderBookContext
         /// </summary>
@@ -272,7 +188,7 @@ namespace QuantConnect.Brokerages.OKX
 
                                     lock (context.Lock)
                                     {
-                                        // Deleokx to OKXOrderBook for full snapshot logic
+                                        // Delegate to OKXOrderBook for full snapshot logic
                                         context.OrderBook.ApplyFullSnapshot(update.Bids, update.Asks);
 
                                         context.LastUpdateId = update.LastUpdateId;
@@ -303,14 +219,17 @@ namespace QuantConnect.Brokerages.OKX
 
                                         if (overflowDetected || update.FirstUpdateId > expectedNextId)
                                         {
-                                            // Set state to Error to pause consumer, then reinitialize synchronously
+                                            // Sequence gap detected - clear orderbook and wait for next snapshot
+                                            Log.Error($"{GetType().Name}.ProcessOrderBookUpdatesAsync(): Sequence gap detected for {context.Symbol}. Expected: {expectedNextId}, Got: {update.FirstUpdateId}. Waiting for snapshot...");
+
                                             lock (context.Lock)
                                             {
-                                                context.State = OrderBookState.Error;
+                                                context.OrderBook.BestBidAskUpdated -= OnBestBidAskUpdated;
+                                                context.OrderBook.Clear();
+                                                context.State = OrderBookState.Initializing;
+                                                context.LastUpdateId = 0;
+                                                context.BaseId = 0;
                                             }
-
-                                            // Call synchronous reinitialization (blocks consumer - intentional barrier)
-                                            ReinitializeOrderBookSync(context);
                                             continue;
                                         }
 

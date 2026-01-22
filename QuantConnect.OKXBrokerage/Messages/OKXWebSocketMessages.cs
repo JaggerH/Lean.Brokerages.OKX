@@ -282,6 +282,19 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// </summary>
         [JsonProperty("checksum", NullValueHandling = NullValueHandling.Ignore)]
         public int? Checksum { get; set; }
+
+        /// <summary>
+        /// Previous sequence ID (used in books channel for detecting message loss)
+        /// -1 for snapshot, equals seqId for no-update keepalive
+        /// </summary>
+        [JsonProperty("prevSeqId", NullValueHandling = NullValueHandling.Ignore)]
+        public long? PreviousSequenceId { get; set; }
+
+        /// <summary>
+        /// Current sequence ID (used in books channel for message ordering)
+        /// </summary>
+        [JsonProperty("seqId", NullValueHandling = NullValueHandling.Ignore)]
+        public long? SequenceId { get; set; }
     }
 
     /// <summary>

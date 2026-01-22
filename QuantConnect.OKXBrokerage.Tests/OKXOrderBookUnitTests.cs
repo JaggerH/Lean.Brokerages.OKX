@@ -38,35 +38,20 @@ namespace QuantConnect.Brokerages.OKX.Tests
         public void Constructor_WithValidParameters_CreatesOrderBook()
         {
             // Arrange & Act
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
 
             // Assert
             Assert.IsNotNull(orderBook);
             Assert.AreEqual(_symbol, orderBook.Symbol);
-            Assert.AreEqual(100, orderBook.MaxDepth);
             Assert.AreEqual(0, orderBook.BidCount);
             Assert.AreEqual(0, orderBook.AskCount);
-        }
-
-        [Test]
-        public void Constructor_WithNegativeDepth_ThrowsArgumentException()
-        {
-            // Arrange & Act & Assert
-            Assert.Throws<ArgumentException>(() => new OKXOrderBook(_symbol, -1));
-        }
-
-        [Test]
-        public void Constructor_WithZeroDepth_ThrowsArgumentException()
-        {
-            // Arrange & Act & Assert
-            Assert.Throws<ArgumentException>(() => new OKXOrderBook(_symbol, 0));
         }
 
         [Test]
         public void UpdateBidRow_AddsSingleBid_UpdatesCorrectly()
         {
             // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
 
             // Act
             orderBook.UpdateBidRow(50000m, 1.5m);
@@ -81,7 +66,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         public void UpdateAskRow_AddsSingleAsk_UpdatesCorrectly()
         {
             // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
 
             // Act
             orderBook.UpdateAskRow(50100m, 2.0m);
@@ -92,53 +77,12 @@ namespace QuantConnect.Brokerages.OKX.Tests
             Assert.AreEqual(2.0m, orderBook.BestAskSize);
         }
 
-        [Test]
-        public void UpdateBidRow_ExceedsMaxDepth_TrimsLowestBids()
-        {
-            // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 5); // Max 5 levels
-
-            // Act - Add 10 bid levels
-            for (int i = 0; i < 10; i++)
-            {
-                decimal price = 50000m + i * 10; // 50000, 50010, 50020, ...
-                orderBook.UpdateBidRow(price, 1.0m);
-            }
-
-            // Assert
-            Assert.AreEqual(5, orderBook.BidCount, "Should maintain max depth of 5");
-
-            var bids = orderBook.GetBids();
-            Assert.AreEqual(50090m, bids[0].price, "Best bid should be highest price");
-            Assert.AreEqual(50050m, bids[4].price, "5th bid should be 5th highest price");
-        }
-
-        [Test]
-        public void UpdateAskRow_ExceedsMaxDepth_TrimsHighestAsks()
-        {
-            // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 5); // Max 5 levels
-
-            // Act - Add 10 ask levels
-            for (int i = 0; i < 10; i++)
-            {
-                decimal price = 51000m + i * 10; // 51000, 51010, 51020, ...
-                orderBook.UpdateAskRow(price, 1.0m);
-            }
-
-            // Assert
-            Assert.AreEqual(5, orderBook.AskCount, "Should maintain max depth of 5");
-
-            var asks = orderBook.GetAsks();
-            Assert.AreEqual(51000m, asks[0].price, "Best ask should be lowest price");
-            Assert.AreEqual(51040m, asks[4].price, "5th ask should be 5th lowest price");
-        }
 
         [Test]
         public void RemoveBidRow_RemovesExistingBid_UpdatesCorrectly()
         {
             // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
             orderBook.UpdateBidRow(50000m, 1.0m);
             orderBook.UpdateBidRow(49990m, 1.5m);
             orderBook.UpdateBidRow(49980m, 2.0m);
@@ -148,15 +92,15 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
             // Assert
             Assert.AreEqual(2, orderBook.BidCount);
-            var bids = orderBook.GetBids();
-            Assert.IsFalse(bids.Any(b => b.price == 49990m), "Removed bid should not exist");
+            var bids = orderBook.GetBids().ToList();
+            Assert.IsFalse(bids.Any(b => b.Key == 49990m), "Removed bid should not exist");
         }
 
         [Test]
         public void RemoveAskRow_RemovesExistingAsk_UpdatesCorrectly()
         {
             // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
             orderBook.UpdateAskRow(51000m, 1.0m);
             orderBook.UpdateAskRow(51010m, 1.5m);
             orderBook.UpdateAskRow(51020m, 2.0m);
@@ -166,53 +110,53 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
             // Assert
             Assert.AreEqual(2, orderBook.AskCount);
-            var asks = orderBook.GetAsks();
-            Assert.IsFalse(asks.Any(a => a.price == 51010m), "Removed ask should not exist");
+            var asks = orderBook.GetAsks().ToList();
+            Assert.IsFalse(asks.Any(a => a.Key == 51010m), "Removed ask should not exist");
         }
 
         [Test]
         public void GetBids_ReturnsDescendingOrder_BestBidFirst()
         {
             // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
             orderBook.UpdateBidRow(50000m, 1.0m);
             orderBook.UpdateBidRow(49990m, 1.5m);
             orderBook.UpdateBidRow(50010m, 0.5m);
 
             // Act
-            var bids = orderBook.GetBids();
+            var bids = orderBook.GetBids().ToList();
 
             // Assert
             Assert.AreEqual(3, bids.Count);
-            Assert.AreEqual(50010m, bids[0].price, "Best bid (highest) should be first");
-            Assert.AreEqual(50000m, bids[1].price);
-            Assert.AreEqual(49990m, bids[2].price, "Worst bid (lowest) should be last");
+            Assert.AreEqual(50010m, bids[0].Key, "Best bid (highest) should be first");
+            Assert.AreEqual(50000m, bids[1].Key);
+            Assert.AreEqual(49990m, bids[2].Key, "Worst bid (lowest) should be last");
         }
 
         [Test]
         public void GetAsks_ReturnsAscendingOrder_BestAskFirst()
         {
             // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
             orderBook.UpdateAskRow(51000m, 1.0m);
             orderBook.UpdateAskRow(51020m, 1.5m);
             orderBook.UpdateAskRow(50990m, 0.5m);
 
             // Act
-            var asks = orderBook.GetAsks();
+            var asks = orderBook.GetAsks().ToList();
 
             // Assert
             Assert.AreEqual(3, asks.Count);
-            Assert.AreEqual(50990m, asks[0].price, "Best ask (lowest) should be first");
-            Assert.AreEqual(51000m, asks[1].price);
-            Assert.AreEqual(51020m, asks[2].price, "Worst ask (highest) should be last");
+            Assert.AreEqual(50990m, asks[0].Key, "Best ask (lowest) should be first");
+            Assert.AreEqual(51000m, asks[1].Key);
+            Assert.AreEqual(51020m, asks[2].Key, "Worst ask (highest) should be last");
         }
 
         [Test]
         public void BestBidAskUpdated_Event_FiresWhenBestPricesChange()
         {
             // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
             var eventFired = false;
             decimal receivedBestBid = 0;
             decimal receivedBestAsk = 0;
@@ -224,10 +168,9 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 receivedBestAsk = e.BestAskPrice;
             };
 
-            // Act
+            // Act - UpdateBidRow fires event automatically when both bid and ask are present
             orderBook.UpdateBidRow(50000m, 1.0m);
             orderBook.UpdateAskRow(51000m, 1.5m);
-            orderBook.TriggerBestBidAskUpdatedIfChanged();
 
             // Assert
             Assert.IsTrue(eventFired, "BestBidAskUpdated event should fire");
@@ -239,7 +182,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         public void Clear_RemovesAllLevels()
         {
             // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
             orderBook.UpdateBidRow(50000m, 1.0m);
             orderBook.UpdateBidRow(49990m, 1.5m);
             orderBook.UpdateAskRow(51000m, 1.0m);
@@ -259,7 +202,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         public void UpdateBidRow_UpdatesExistingPrice_ReplacesSize()
         {
             // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
             orderBook.UpdateBidRow(50000m, 1.0m);
 
             // Act
@@ -274,7 +217,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         public void UpdateAskRow_UpdatesExistingPrice_ReplacesSize()
         {
             // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
             orderBook.UpdateAskRow(51000m, 1.0m);
 
             // Act
@@ -289,7 +232,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         public void RemoveBidRow_RemovesBestBid_UpdatesBestBidPrice()
         {
             // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
             orderBook.UpdateBidRow(50000m, 1.0m);
             orderBook.UpdateBidRow(49990m, 1.5m);
             orderBook.UpdateBidRow(49980m, 2.0m);
@@ -306,7 +249,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         public void RemoveAskRow_RemovesBestAsk_UpdatesBestAskPrice()
         {
             // Arrange
-            var orderBook = new OKXOrderBook(_symbol, 100);
+            var orderBook = new OKXOrderBook(_symbol);
             orderBook.UpdateAskRow(51000m, 1.0m);
             orderBook.UpdateAskRow(51010m, 1.5m);
             orderBook.UpdateAskRow(51020m, 2.0m);
