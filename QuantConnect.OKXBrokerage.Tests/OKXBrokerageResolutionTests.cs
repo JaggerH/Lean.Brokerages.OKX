@@ -32,8 +32,11 @@ using QuantConnect.Orders;
 namespace QuantConnect.Brokerages.OKX.Tests
 {
     /// <summary>
-    /// Tests for OKX Resolution-based subscriptions
-    /// Validates Orderbook subscriptions with simple table output
+    /// Tests for OKX Resolution-based subscriptions.
+    /// Validates different Resolution types (Tick, Orderbook) use appropriate channels:
+    /// - Resolution.Tick with TickType.Quote uses tickers channel (lightweight)
+    /// - Resolution.Tick with TickType.Trade uses trades channel
+    /// - Resolution.Tick with typeof(Orderbook) uses order_book channel (full depth)
     /// </summary>
     [TestFixture]
     [Explicit("Requires valid OKX credentials and active market connection")]
@@ -41,12 +44,14 @@ namespace QuantConnect.Brokerages.OKX.Tests
     {
         private IDataQueueHandler _brokerage;
         private readonly List<Orderbook> _receivedOrderbooks = new();
+        private readonly List<Tick> _receivedTicks = new();
         private readonly object _dataLock = new object();
 
         [SetUp]
         public void Setup()
         {
             _receivedOrderbooks.Clear();
+            _receivedTicks.Clear();
         }
 
         /// <summary>
@@ -118,7 +123,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             Thread.Sleep(1000);
         }
 
-        #region Spot OrderBook Tests
+        #region Spot Tests
 
         [Test]
         public void Spot_OrderBook()
@@ -134,9 +139,23 @@ namespace QuantConnect.Brokerages.OKX.Tests
             );
         }
 
+        [Test]
+        public void Spot_Tick()
+        {
+            SetupBrokerage("Spot");
+            TestTickerChannelSubscription("BTCUSDT", SecurityType.Crypto, expectedQuoteTicks: 10, maxDurationSeconds: 60, "Spot");
+        }
+
+        [Test]
+        public void Spot_Tick_Trade()
+        {
+            SetupBrokerage("Spot");
+            TestTradeChannelSubscription("BTCUSDT", SecurityType.Crypto, expectedTradeTicks: 10, maxDurationSeconds: 60, "Spot");
+        }
+
         #endregion
 
-        #region Futures OrderBook Tests
+        #region Futures Tests
 
         [Test]
         public void Futures_OrderBook()
@@ -150,6 +169,20 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 maxDurationSeconds: 60,
                 marketType: "Futures"
             );
+        }
+
+        [Test]
+        public void Futures_Tick()
+        {
+            SetupBrokerage("Futures");
+            TestTickerChannelSubscription("BTCUSDT", SecurityType.CryptoFuture, expectedQuoteTicks: 10, maxDurationSeconds: 60, "Futures");
+        }
+
+        [Test]
+        public void Futures_Tick_Trade()
+        {
+            SetupBrokerage("Futures");
+            TestTradeChannelSubscription("BTCUSDT", SecurityType.CryptoFuture, expectedTradeTicks: 10, maxDurationSeconds: 60, "Futures");
         }
 
         #endregion
@@ -256,6 +289,145 @@ namespace QuantConnect.Brokerages.OKX.Tests
             Log.Trace("[OK] Test completed");
         }
 
+        /// <summary>
+        /// Tests that Resolution.Tick subscriptions use tickers channel for Quote data.
+        /// </summary>
+        private void TestTickerChannelSubscription(
+            string symbolValue,
+            SecurityType securityType,
+            int expectedQuoteTicks,
+            int maxDurationSeconds,
+            string marketType)
+        {
+            var symbol = Symbol.Create(symbolValue, securityType, Market.OKX);
+            var startTime = DateTime.UtcNow;
+            var timeoutTime = startTime.AddSeconds(maxDurationSeconds);
+            var quoteTicksReceived = new List<Tick>();
+
+            LogTestHeader($"{marketType} Ticker Channel Test", symbolValue, expectedQuoteTicks, maxDurationSeconds);
+
+            ConnectBrokerage();
+            Thread.Sleep(1000);
+            Assert.IsTrue(_brokerage.IsConnected, "Brokerage should be connected");
+            Log.Trace("[OK] Connected");
+
+            var tickConfig = CreateQuoteTickConfig(symbol);
+            var enumerator = _brokerage.Subscribe(tickConfig, (_, _) => { });
+            Assert.IsNotNull(enumerator, "Enumerator should not be null");
+
+            Log.Trace($"[INFO] Subscribed to {symbolValue} with Resolution.Tick + TickType.Quote");
+            Log.Trace("+---------+-----------+-------------+-------------+------------+--------+");
+            Log.Trace("|  Tick # |   Time    |  Bid Price  |  Ask Price  |   Spread   | Value  |");
+            Log.Trace("+---------+-----------+-------------+-------------+------------+--------+");
+
+            while (DateTime.UtcNow < timeoutTime && quoteTicksReceived.Count < expectedQuoteTicks)
+            {
+                if (!enumerator.MoveNext())
+                {
+                    Thread.Sleep(100);
+                    continue;
+                }
+
+                var tick = enumerator.Current as Tick;
+                if (tick == null || tick.TickType != TickType.Quote)
+                {
+                    continue;
+                }
+
+                quoteTicksReceived.Add(tick);
+                var spread = tick.AskPrice - tick.BidPrice;
+                var elapsed = DateTime.UtcNow - startTime;
+
+                Log.Trace($"| {quoteTicksReceived.Count,7} | {elapsed.TotalSeconds,8:F2}s | {tick.BidPrice,11:F2} | {tick.AskPrice,11:F2} | {spread,10:F2} | {tick.Value,6:F2} |");
+
+                Assert.Greater(tick.BidPrice, 0, "Bid price should be positive");
+                Assert.Greater(tick.AskPrice, 0, "Ask price should be positive");
+                Assert.AreEqual((tick.BidPrice + tick.AskPrice) / 2, tick.Value, "Tick value should be mid-price");
+
+                Thread.Sleep(100);
+            }
+
+            Log.Trace("+---------+-----------+-------------+-------------+------------+--------+");
+
+            var totalElapsed = DateTime.UtcNow - startTime;
+            Assert.Greater(quoteTicksReceived.Count, 0, "Should have received quote ticks from tickers channel");
+
+            LogTickerSummary(symbolValue, marketType, quoteTicksReceived, totalElapsed);
+
+            _brokerage.Unsubscribe(tickConfig);
+            Log.Trace("[OK] Test completed");
+        }
+
+        /// <summary>
+        /// Tests that Resolution.Tick subscriptions use trades channel for Trade data.
+        /// </summary>
+        private void TestTradeChannelSubscription(
+            string symbolValue,
+            SecurityType securityType,
+            int expectedTradeTicks,
+            int maxDurationSeconds,
+            string marketType)
+        {
+            var symbol = Symbol.Create(symbolValue, securityType, Market.OKX);
+            var startTime = DateTime.UtcNow;
+            var timeoutTime = startTime.AddSeconds(maxDurationSeconds);
+            var tradeTicksReceived = new List<Tick>();
+
+            LogTestHeader($"{marketType} Trade Channel Test", symbolValue, expectedTradeTicks, maxDurationSeconds);
+
+            ConnectBrokerage();
+            Thread.Sleep(1000);
+            Assert.IsTrue(_brokerage.IsConnected, "Brokerage should be connected");
+            Log.Trace("[OK] Connected");
+
+            var tickConfig = CreateTradeTickConfig(symbol);
+            var enumerator = _brokerage.Subscribe(tickConfig, (_, _) => { });
+            Assert.IsNotNull(enumerator, "Enumerator should not be null");
+
+            Log.Trace($"[INFO] Subscribed to {symbolValue} with Resolution.Tick + TickType.Trade");
+            Log.Trace("+---------+-----------+-------------+-------------+----------+");
+            Log.Trace("|  Tick # |   Time    |    Price    |   Quantity  |  Value   |");
+            Log.Trace("+---------+-----------+-------------+-------------+----------+");
+
+            while (DateTime.UtcNow < timeoutTime && tradeTicksReceived.Count < expectedTradeTicks)
+            {
+                if (!enumerator.MoveNext())
+                {
+                    Thread.Sleep(100);
+                    continue;
+                }
+
+                var tick = enumerator.Current as Tick;
+                if (tick == null || tick.TickType != TickType.Trade)
+                {
+                    continue;
+                }
+
+                tradeTicksReceived.Add(tick);
+                var elapsed = DateTime.UtcNow - startTime;
+
+                Log.Trace($"| {tradeTicksReceived.Count,7} | {elapsed.TotalSeconds,8:F2}s | {tick.Value,11:F2} | {tick.Quantity,11:F8} | {tick.Value,8:F2} |");
+
+                // Validate Trade tick fields
+                Assert.Greater(tick.Value, 0, "Price should be positive");
+                Assert.Greater(tick.Quantity, 0, "Quantity should be positive");
+                Assert.AreEqual(TickType.Trade, tick.TickType, "TickType should be Trade");
+                Assert.AreEqual(symbol, tick.Symbol, "Symbol should match");
+
+                Thread.Sleep(100);
+            }
+
+            Log.Trace("+---------+-----------+-------------+-------------+----------+");
+
+            var totalElapsed = DateTime.UtcNow - startTime;
+            Assert.Greater(tradeTicksReceived.Count, 0, "Should have received trade ticks from trades channel");
+
+            LogTradeSummary(symbolValue, marketType, tradeTicksReceived, totalElapsed);
+
+            _brokerage.Unsubscribe(tickConfig);
+            Log.Trace("[OK] Test completed");
+        }
+
         #endregion
 
         #region Helper Methods
@@ -290,6 +462,77 @@ namespace QuantConnect.Brokerages.OKX.Tests
             {
                 b.Connect();
             }
+        }
+
+        private static void LogTestHeader(string testName, string symbolValue, int maxItems, int maxDurationSeconds)
+        {
+            Log.Trace("");
+            Log.Trace("+========================================================================+");
+            Log.Trace($"|  {testName} - {symbolValue,-25} |");
+            Log.Trace("+========================================================================+");
+            Log.Trace($"  Max Items: {maxItems}, Max Duration: {maxDurationSeconds}s");
+            Log.Trace("");
+        }
+
+        private static SubscriptionDataConfig CreateQuoteTickConfig(Symbol symbol)
+        {
+            return new SubscriptionDataConfig(
+                typeof(Tick),
+                symbol,
+                Resolution.Tick,
+                TimeZones.Utc,
+                TimeZones.Utc,
+                false, false, false, false,
+                TickType.Quote
+            );
+        }
+
+        private static SubscriptionDataConfig CreateTradeTickConfig(Symbol symbol)
+        {
+            return new SubscriptionDataConfig(
+                typeof(Tick),
+                symbol,
+                Resolution.Tick,
+                TimeZones.Utc,
+                TimeZones.Utc,
+                false, false, false, false,
+                TickType.Trade
+            );
+        }
+
+        private static void LogTickerSummary(string symbolValue, string marketType, List<Tick> ticks, TimeSpan totalElapsed)
+        {
+            var firstTick = ticks.First();
+            var lastTick = ticks.Last();
+            var avgSpread = ticks.Average(t => t.AskPrice - t.BidPrice);
+            var tickRate = ticks.Count / totalElapsed.TotalSeconds;
+
+            Log.Trace("+========================================================================+");
+            Log.Trace("|                        TICKER TEST SUMMARY                             |");
+            Log.Trace("+========================================================================+");
+            Log.Trace($"|  Market: {marketType}, Symbol: {symbolValue}");
+            Log.Trace($"|  Ticks: {ticks.Count}, Duration: {totalElapsed.TotalSeconds:F2}s, Rate: {tickRate:F2}/s");
+            Log.Trace($"|  First: {firstTick.BidPrice:F2} / {firstTick.AskPrice:F2}, Last: {lastTick.BidPrice:F2} / {lastTick.AskPrice:F2}");
+            Log.Trace($"|  Avg Spread: {avgSpread:F2}");
+            Log.Trace("+========================================================================+");
+        }
+
+        private static void LogTradeSummary(string symbolValue, string marketType, List<Tick> ticks, TimeSpan totalElapsed)
+        {
+            var firstTick = ticks.First();
+            var lastTick = ticks.Last();
+            var avgQuantity = ticks.Average(t => t.Quantity);
+            var totalVolume = ticks.Sum(t => t.Quantity);
+            var tickRate = ticks.Count / totalElapsed.TotalSeconds;
+
+            Log.Trace("+========================================================================+");
+            Log.Trace("|                        TRADE TEST SUMMARY                              |");
+            Log.Trace("+========================================================================+");
+            Log.Trace($"|  Market: {marketType}, Symbol: {symbolValue}");
+            Log.Trace($"|  Ticks: {ticks.Count}, Duration: {totalElapsed.TotalSeconds:F2}s, Rate: {tickRate:F2}/s");
+            Log.Trace($"|  First Price: {firstTick.Value:F2}, Last Price: {lastTick.Value:F2}");
+            Log.Trace($"|  Avg Quantity: {avgQuantity:F8}, Total Volume: {totalVolume:F8}");
+            Log.Trace("+========================================================================+");
         }
 
         #endregion
