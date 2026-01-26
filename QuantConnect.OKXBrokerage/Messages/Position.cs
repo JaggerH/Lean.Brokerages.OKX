@@ -18,11 +18,29 @@ using Newtonsoft.Json;
 namespace QuantConnect.Brokerages.OKX.Messages
 {
     /// <summary>
-    /// Represents OKX v5 position information
+    /// Represents an OKX v5 API position
     /// https://www.okx.com/docs-v5/en/#rest-api-account-get-positions
+    ///
+    /// Response format:
+    /// {
+    ///   "instId": "BTC-USDT-SWAP",
+    ///   "pos": "10",
+    ///   "availPos": "10",
+    ///   "avgPx": "50000",
+    ///   "upl": "500.5",
+    ///   "posSide": "long",
+    ///   "mgnMode": "cross",
+    ///   "lever": "10"
+    /// }
     /// </summary>
     public class Position
     {
+        /// <summary>
+        /// Instrument ID (e.g., BTC-USDT-SWAP, BTC-USDT-230630)
+        /// </summary>
+        [JsonProperty("instId")]
+        public string InstrumentId { get; set; }
+
         /// <summary>
         /// Instrument type: MARGIN, SWAP, FUTURES, OPTION
         /// </summary>
@@ -30,244 +48,17 @@ namespace QuantConnect.Brokerages.OKX.Messages
         public string InstrumentType { get; set; }
 
         /// <summary>
-        /// Margin mode: cross, isolated
-        /// </summary>
-        [JsonProperty("mgnMode")]
-        public string MarginMode { get; set; }
-
-        /// <summary>
-        /// Position ID
-        /// </summary>
-        [JsonProperty("posId")]
-        public string PositionId { get; set; }
-
-        /// <summary>
-        /// Position side: long, short (only for hedge mode)
-        /// </summary>
-        [JsonProperty("posSide")]
-        public string PositionSide { get; set; }
-
-        /// <summary>
-        /// Quantity of positions (positive for long, negative for short in net mode)
+        /// Position quantity
+        /// Positive for long positions, negative for short positions
         /// </summary>
         [JsonProperty("pos")]
         public string Quantity { get; set; }
 
         /// <summary>
-        /// Base currency (for MARGIN only)
+        /// Available position that can be closed
         /// </summary>
-        [JsonProperty("baseCcy")]
-        public string BaseCurrency { get; set; }
-
-        /// <summary>
-        /// Quote currency (for MARGIN only)
-        /// </summary>
-        [JsonProperty("quoteCcy")]
-        public string QuoteCurrency { get; set; }
-
-        /// <summary>
-        /// Base currency balance (for MARGIN only)
-        /// </summary>
-        [JsonProperty("baseBal")]
-        public string BaseBalance { get; set; }
-
-        /// <summary>
-        /// Quote currency balance (for MARGIN only)
-        /// </summary>
-        [JsonProperty("quoteBal")]
-        public string QuoteBalance { get; set; }
-
-        /// <summary>
-        /// Base borrowed (for MARGIN only)
-        /// </summary>
-        [JsonProperty("baseBorrowed")]
-        public string BaseBorrowed { get; set; }
-
-        /// <summary>
-        /// Base interest (for MARGIN only)
-        /// </summary>
-        [JsonProperty("baseInterest")]
-        public string BaseInterest { get; set; }
-
-        /// <summary>
-        /// Quote borrowed (for MARGIN only)
-        /// </summary>
-        [JsonProperty("quoteBorrowed")]
-        public string QuoteBorrowed { get; set; }
-
-        /// <summary>
-        /// Quote interest (for MARGIN only)
-        /// </summary>
-        [JsonProperty("quoteInterest")]
-        public string QuoteInterest { get; set; }
-
-        /// <summary>
-        /// Instrument ID (e.g., BTC-USDT-SWAP)
-        /// </summary>
-        [JsonProperty("instId")]
-        public string InstrumentId { get; set; }
-
-        /// <summary>
-        /// Leverage (not applicable to OPTION seller)
-        /// </summary>
-        [JsonProperty("lever")]
-        public string Leverage { get; set; }
-
-        /// <summary>
-        /// Liquidation price (not applicable to OPTION)
-        /// </summary>
-        [JsonProperty("liqPx")]
-        public string LiquidationPrice { get; set; }
-
-        /// <summary>
-        /// Mark price
-        /// </summary>
-        [JsonProperty("markPx")]
-        public string MarkPrice { get; set; }
-
-        /// <summary>
-        /// Initial margin requirement
-        /// </summary>
-        [JsonProperty("imr")]
-        public string InitialMarginRequirement { get; set; }
-
-        /// <summary>
-        /// Margin
-        /// </summary>
-        [JsonProperty("margin")]
-        public string Margin { get; set; }
-
-        /// <summary>
-        /// Margin ratio
-        /// </summary>
-        [JsonProperty("mgnRatio")]
-        public string MarginRatio { get; set; }
-
-        /// <summary>
-        /// Maintenance margin requirement
-        /// </summary>
-        [JsonProperty("mmr")]
-        public string MaintenanceMarginRequirement { get; set; }
-
-        /// <summary>
-        /// Liabilities (applicable to MARGIN)
-        /// </summary>
-        [JsonProperty("liab")]
-        public string Liabilities { get; set; }
-
-        /// <summary>
-        /// Liabilities currency (applicable to MARGIN)
-        /// </summary>
-        [JsonProperty("liabCcy")]
-        public string LiabilitiesCurrency { get; set; }
-
-        /// <summary>
-        /// Interest
-        /// </summary>
-        [JsonProperty("interest")]
-        public string Interest { get; set; }
-
-        /// <summary>
-        /// Trade ID (last trade)
-        /// </summary>
-        [JsonProperty("tradeId")]
-        public string TradeId { get; set; }
-
-        /// <summary>
-        /// Option value (applicable to OPTION)
-        /// </summary>
-        [JsonProperty("optVal")]
-        public string OptionValue { get; set; }
-
-        /// <summary>
-        /// Notional value in USD
-        /// </summary>
-        [JsonProperty("notionalUsd")]
-        public string NotionalUsd { get; set; }
-
-        /// <summary>
-        /// Auto-deleveraging indicator: 1,2,3,4,5 (5 is most likely)
-        /// </summary>
-        [JsonProperty("adl")]
-        public string AutoDeleveraging { get; set; }
-
-        /// <summary>
-        /// Currency (margin currency)
-        /// </summary>
-        [JsonProperty("ccy")]
-        public string Currency { get; set; }
-
-        /// <summary>
-        /// Last traded price
-        /// </summary>
-        [JsonProperty("last")]
-        public string Last { get; set; }
-
-        /// <summary>
-        /// USD price (applicable to OPTION)
-        /// </summary>
-        [JsonProperty("usdPx")]
-        public string UsdPrice { get; set; }
-
-        /// <summary>
-        /// Unrealized profit and loss
-        /// </summary>
-        [JsonProperty("upl")]
-        public string UnrealizedPnL { get; set; }
-
-        /// <summary>
-        /// Unrealized profit and loss ratio
-        /// </summary>
-        [JsonProperty("uplRatio")]
-        public string UnrealizedPnLRatio { get; set; }
-
-        /// <summary>
-        /// Instrument family (for derivatives)
-        /// </summary>
-        [JsonProperty("instFamily")]
-        public string InstrumentFamily { get; set; }
-
-        /// <summary>
-        /// Delta (for options)
-        /// </summary>
-        [JsonProperty("delta")]
-        public string Delta { get; set; }
-
-        /// <summary>
-        /// Gamma (for options)
-        /// </summary>
-        [JsonProperty("gamma")]
-        public string Gamma { get; set; }
-
-        /// <summary>
-        /// Vega (for options)
-        /// </summary>
-        [JsonProperty("vega")]
-        public string Vega { get; set; }
-
-        /// <summary>
-        /// Theta (for options)
-        /// </summary>
-        [JsonProperty("theta")]
-        public string Theta { get; set; }
-
-        /// <summary>
-        /// Position creation time (Unix timestamp in milliseconds)
-        /// </summary>
-        [JsonProperty("cTime")]
-        public string CreateTime { get; set; }
-
-        /// <summary>
-        /// Latest position update time (Unix timestamp in milliseconds)
-        /// </summary>
-        [JsonProperty("uTime")]
-        public string UpdateTime { get; set; }
-
-        /// <summary>
-        /// Push time of positions information (Unix timestamp in milliseconds)
-        /// </summary>
-        [JsonProperty("pTime")]
-        public string PushTime { get; set; }
+        [JsonProperty("availPos")]
+        public string AvailablePosition { get; set; }
 
         /// <summary>
         /// Average open price
@@ -276,51 +67,45 @@ namespace QuantConnect.Brokerages.OKX.Messages
         public string AveragePrice { get; set; }
 
         /// <summary>
-        /// Break-even price
+        /// Unrealized profit and loss
         /// </summary>
-        [JsonProperty("bePx")]
-        public string BreakEvenPrice { get; set; }
+        [JsonProperty("upl")]
+        public string UnrealizedPnL { get; set; }
 
         /// <summary>
-        /// Quantity that can be closed
+        /// Position side: long, short, or net
         /// </summary>
-        [JsonProperty("closeOrderAlgo")]
-        public string CloseOrderAlgo { get; set; }
+        [JsonProperty("posSide")]
+        public string PositionSide { get; set; }
 
         /// <summary>
-        /// Position type: net(one-way), long/short(hedge)
+        /// Margin mode: cross or isolated
         /// </summary>
-        [JsonProperty("posMode")]
-        public string PositionMode { get; set; }
+        [JsonProperty("mgnMode")]
+        public string MarginMode { get; set; }
 
         /// <summary>
-        /// Realized profit and loss
+        /// Leverage
         /// </summary>
-        [JsonProperty("realizedPnl")]
-        public string RealizedPnL { get; set; }
+        [JsonProperty("lever")]
+        public string Leverage { get; set; }
 
         /// <summary>
-        /// Fee
+        /// Last price (mark price for derivatives)
         /// </summary>
-        [JsonProperty("fee")]
-        public string Fee { get; set; }
+        [JsonProperty("last")]
+        public string LastPrice { get; set; }
 
         /// <summary>
-        /// Funding fee
+        /// Currency for position
         /// </summary>
-        [JsonProperty("fundingFee")]
-        public string FundingFee { get; set; }
+        [JsonProperty("ccy")]
+        public string Currency { get; set; }
 
         /// <summary>
-        /// Latest price from orderbook
+        /// Update time (Unix timestamp in milliseconds)
         /// </summary>
-        [JsonProperty("bizRefId")]
-        public string BizRefId { get; set; }
-
-        /// <summary>
-        /// Business type
-        /// </summary>
-        [JsonProperty("bizRefType")]
-        public string BizRefType { get; set; }
+        [JsonProperty("uTime")]
+        public long UpdateTime { get; set; }
     }
 }

@@ -41,7 +41,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
     ///   "uTime": "1597026383085"
     /// }
     /// </summary>
-    public class OKXOrder
+    public class Order
     {
         /// <summary>
         /// Instrument ID (e.g., BTC-USDT, BTC-USDT-SWAP)

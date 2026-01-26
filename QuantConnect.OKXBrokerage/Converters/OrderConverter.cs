@@ -22,6 +22,9 @@ using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 
+using LeanOrder = QuantConnect.Orders.Order;
+using OKXOrder = QuantConnect.Brokerages.OKX.Messages.Order;
+
 namespace QuantConnect.Brokerages.OKX.Converters
 {
     /// <summary>
@@ -35,7 +38,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
         /// <param name="okxOrder">OKX order</param>
         /// <param name="symbolMapper">Symbol mapper for converting OKX symbols to LEAN symbols</param>
         /// <returns>LEAN Order object or null if conversion fails</returns>
-        public static Order ToLeanOrder(this OKXOrder okxOrder, ISymbolMapper symbolMapper)
+        public static LeanOrder ToLeanOrder(this OKXOrder okxOrder, ISymbolMapper symbolMapper)
         {
             if (okxOrder == null || string.IsNullOrEmpty(okxOrder.InstrumentId))
             {
@@ -89,7 +92,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
                 var createTime = DateTimeOffset.FromUnixTimeMilliseconds(okxOrder.CreateTime).UtcDateTime;
 
                 // Create appropriate order type using constructors
-                Order order = null;
+                LeanOrder order = null;
 
                 switch (okxOrder.OrderType.ToLowerInvariant())
                 {
@@ -216,7 +219,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
         /// <param name="order">OKX WebSocket order update</param>
         /// <param name="leanOrder">The LEAN order associated with this update</param>
         /// <returns>LEAN OrderEvent or null if this update should be ignored</returns>
-        public static OrderEvent ToOrderEvent(this OKXWebSocketOrder order, Order leanOrder)
+        public static OrderEvent ToOrderEvent(this WebSocketOrder order, LeanOrder leanOrder)
         {
             if (order == null || leanOrder == null)
             {

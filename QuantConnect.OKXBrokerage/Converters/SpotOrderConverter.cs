@@ -22,6 +22,9 @@ using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 using QuantConnect.Logging;
 
+using LeanOrder = QuantConnect.Orders.Order;
+using OKXOrder = QuantConnect.Brokerages.OKX.Messages.Order;
+
 namespace QuantConnect.Brokerages.OKX.Converters
 {
     /// <summary>
@@ -123,7 +126,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
         /// <param name="okxOrder">OKX spot order</param>
         /// <param name="symbolMapper">Symbol mapper for converting OKX symbols to LEAN symbols</param>
         /// <returns>LEAN Order object or null if conversion fails</returns>
-        public static Order ToLeanOrder(this SpotOrder okxOrder, ISymbolMapper symbolMapper)
+        public static LeanOrder ToLeanOrder(this SpotOrder okxOrder, ISymbolMapper symbolMapper)
         {
             if (okxOrder == null || string.IsNullOrEmpty(okxOrder.CurrencyPair))
             {
@@ -148,7 +151,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
             var createTime = OKXUtility.UnixSecondsToDateTime(okxOrder.CreateTime);
 
             // Create the appropriate LEAN order based on type
-            Order leanOrder;
+            LeanOrder leanOrder;
             if (okxOrder.Type == "limit")
             {
                 leanOrder = new LimitOrder(symbol, amount, price, createTime);
@@ -182,7 +185,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
         /// <param name="okxOrder">OKX spot order (assumed valid, validated by SpotOrderConverter)</param>
         /// <param name="leanOrder">The LEAN order being amended</param>
         /// <returns>LEAN OrderEvent object</returns>
-        public static OrderEvent ToOrderAmendEvent(this SpotOrder okxOrder, Order leanOrder)
+        public static OrderEvent ToOrderAmendEvent(this SpotOrder okxOrder, LeanOrder leanOrder)
         {
             // ========================================
             // NO VALIDATION NEEDED

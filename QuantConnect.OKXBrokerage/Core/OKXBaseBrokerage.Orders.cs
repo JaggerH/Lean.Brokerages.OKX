@@ -156,7 +156,7 @@ namespace QuantConnect.Brokerages.OKX
             CachedOrderIDs.TryAdd(order.Id, order);
 
             // 4. Build FOK limit order request
-            var request = new Messages.OKXPlaceOrderRequest
+            var request = new Messages.PlaceOrderRequest
             {
                 InstrumentId = instId,
                 TradeMode = tdMode,
@@ -226,7 +226,7 @@ namespace QuantConnect.Brokerages.OKX
             CachedOrderIDs.TryAdd(order.Id, order);
 
             // Create place order request
-            var request = new Messages.OKXPlaceOrderRequest
+            var request = new Messages.PlaceOrderRequest
             {
                 InstrumentId = instId,
                 TradeMode = tdMode,
@@ -321,7 +321,7 @@ namespace QuantConnect.Brokerages.OKX
                     }
 
                     // Create amend request
-                    var request = new Messages.OKXAmendOrderRequest
+                    var request = new Messages.AmendOrderRequest
                     {
                         InstrumentId = instId,
                         OrderId = ordId,
@@ -380,7 +380,7 @@ namespace QuantConnect.Brokerages.OKX
                     var instId = _symbolMapper.GetBrokerageSymbol(order.Symbol);
 
                     // Create cancel request
-                    var request = new Messages.OKXCancelOrderRequest
+                    var request = new Messages.CancelOrderRequest
                     {
                         InstrumentId = instId,
                         OrderId = ordId

@@ -136,7 +136,7 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         protected virtual void HandleEventMessage(JObject jObject)
         {
-            var response = jObject.ToObject<OKXWebSocketResponse>();
+            var response = jObject.ToObject<WebSocketResponse>();
 
             // Log all event messages for debugging
             Log.Trace($"{GetType().Name}.HandleEventMessage(): Received event '{response.Event}', Code: '{response.Code ?? "null"}', Message: '{response.Message ?? "null"}'");
@@ -168,7 +168,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Handles login event
         /// </summary>
-        protected virtual void HandleLoginEvent(OKXWebSocketResponse response)
+        protected virtual void HandleLoginEvent(WebSocketResponse response)
         {
             // OKX login success: code = "0" or no code field
             // OKX login failure: code != "0"
@@ -201,7 +201,7 @@ namespace QuantConnect.Brokerages.OKX
         /// OKX subscribe success: no code field or code = "0"
         /// OKX subscribe failure: code field present and != "0"
         /// </summary>
-        protected virtual void HandleSubscribeEvent(OKXWebSocketResponse response)
+        protected virtual void HandleSubscribeEvent(WebSocketResponse response)
         {
             var channel = response.Arg?.Channel;
             var instType = response.Arg?.InstrumentType;
@@ -238,7 +238,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Handles unsubscribe event
         /// </summary>
-        protected virtual void HandleUnsubscribeEvent(OKXWebSocketResponse response)
+        protected virtual void HandleUnsubscribeEvent(WebSocketResponse response)
         {
             var channel = response.Arg?.Channel;
             var instId = response.Arg?.InstrumentId;
@@ -249,7 +249,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Handles error event
         /// </summary>
-        protected virtual void HandleErrorEvent(OKXWebSocketResponse response)
+        protected virtual void HandleErrorEvent(WebSocketResponse response)
         {
             Log.Error($"{GetType().Name}: WebSocket error - Code: {response.Code}, Message: {response.Message}");
             OnMessage(new BrokerageMessageEvent(
@@ -267,7 +267,7 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         protected virtual void HandleDataMessage(JObject jObject)
         {
-            var arg = jObject["arg"].ToObject<OKXWebSocketChannel>();
+            var arg = jObject["arg"].ToObject<WebSocketChannel>();
             var channel = arg.Channel;
 
             // Route to appropriate handler based on channel
@@ -316,7 +316,7 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketOrder>>();
+                var message = jObject.ToObject<WebSocketDataMessage<WebSocketOrder>>();
 
                 if (message.Data == null || message.Data.Count == 0)
                 {
@@ -341,7 +341,7 @@ namespace QuantConnect.Brokerages.OKX
         /// - When tradeId is empty and state=filled: this is a market order close event
         /// - Duplicate messages may be pushed (with different uTime), only process first
         /// </summary>
-        protected virtual void HandleOrderUpdate(OKXWebSocketOrder order)
+        protected virtual void HandleOrderUpdate(WebSocketOrder order)
         {
             try
             {
@@ -407,7 +407,7 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketAccount>>();
+                var message = jObject.ToObject<WebSocketDataMessage<WebSocketAccount>>();
 
                 if (message.Data == null || message.Data.Count == 0)
                 {
@@ -428,7 +428,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Handles individual account update
         /// </summary>
-        protected virtual void HandleAccountUpdate(OKXWebSocketAccount account)
+        protected virtual void HandleAccountUpdate(WebSocketAccount account)
         {
             try
             {
@@ -454,7 +454,7 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketPosition>>();
+                var message = jObject.ToObject<WebSocketDataMessage<WebSocketPosition>>();
 
                 if (message.Data == null || message.Data.Count == 0)
                 {
@@ -475,11 +475,11 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Handles individual position update
         /// </summary>
-        protected virtual void HandlePositionUpdate(OKXWebSocketPosition position)
+        protected virtual void HandlePositionUpdate(WebSocketPosition position)
         {
             try
             {
-                Log.Trace($"{GetType().Name}.HandlePositionUpdate(): {position.InstrumentId} Position: {position.Position}, UPL: {position.UnrealizedPnL}");
+                Log.Trace($"{GetType().Name}.HandlePositionUpdate(): {position.InstrumentId} Position: {position.Quantity}, UPL: {position.UnrealizedPnL}");
 
                 // Position updates can trigger AccountChanged event if needed
                 // Implementation depends on specific requirements
@@ -503,7 +503,7 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketTicker>>();
+                var message = jObject.ToObject<WebSocketDataMessage<WebSocketTicker>>();
 
                 if (message.Data == null || message.Data.Count == 0)
                 {
@@ -529,7 +529,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Handles individual ticker update
         /// </summary>
-        protected virtual void HandleTickerUpdate(OKXWebSocketTicker ticker)
+        protected virtual void HandleTickerUpdate(WebSocketTicker ticker)
         {
             try
             {
@@ -582,7 +582,7 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketTrade>>();
+                var message = jObject.ToObject<WebSocketDataMessage<WebSocketTrade>>();
 
                 if (message.Data == null || message.Data.Count == 0)
                 {
@@ -608,7 +608,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Handles individual trade update
         /// </summary>
-        protected virtual void HandleTradeUpdate(OKXWebSocketTrade trade)
+        protected virtual void HandleTradeUpdate(WebSocketTrade trade)
         {
             try
             {
@@ -652,7 +652,7 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketOrderBook>>();
+                var message = jObject.ToObject<WebSocketDataMessage<WebSocketOrderBook>>();
 
                 if (message.Data == null || message.Data.Count == 0)
                 {
@@ -681,7 +681,7 @@ namespace QuantConnect.Brokerages.OKX
         /// Action: "snapshot" = full 400-level snapshot, "update" = incremental changes
         /// Implements sequence validation using seqId/prevSeqId from OKX docs
         /// </summary>
-        protected virtual void HandleOrderBookUpdate(OKXWebSocketOrderBook orderBook, string action)
+        protected virtual void HandleOrderBookUpdate(WebSocketOrderBook orderBook, string action)
         {
             try
             {
@@ -822,7 +822,7 @@ namespace QuantConnect.Brokerages.OKX
         /// Helper method to emit a quote tick from order book data
         /// Used when orderbook context is not available
         /// </summary>
-        private void EmitQuoteTickFromOrderBook(Symbol symbol, OKXWebSocketOrderBook orderBook, DateTime time)
+        private void EmitQuoteTickFromOrderBook(Symbol symbol, WebSocketOrderBook orderBook, DateTime time)
         {
             try
             {

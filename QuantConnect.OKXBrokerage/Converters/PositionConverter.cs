@@ -33,7 +33,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
         /// <param name="okxPosition">OKX position</param>
         /// <param name="symbolMapper">Symbol mapper for converting OKX symbols to LEAN symbols</param>
         /// <returns>LEAN Holding object or null if conversion fails or position is empty</returns>
-        public static Holding ToHolding(this OKXPosition okxPosition, ISymbolMapper symbolMapper)
+        public static Holding ToHolding(this Position okxPosition, ISymbolMapper symbolMapper)
         {
             if (okxPosition == null || string.IsNullOrEmpty(okxPosition.InstrumentId))
             {
@@ -44,9 +44,9 @@ namespace QuantConnect.Brokerages.OKX.Converters
             try
             {
                 // Parse position quantity
-                if (!decimal.TryParse(okxPosition.Position, NumberStyles.Any, CultureInfo.InvariantCulture, out var quantity))
+                if (!decimal.TryParse(okxPosition.Quantity, NumberStyles.Any, CultureInfo.InvariantCulture, out var quantity))
                 {
-                    Log.Error($"PositionConverter.ToHolding(): Failed to parse Position: {okxPosition.Position}");
+                    Log.Error($"PositionConverter.ToHolding(): Failed to parse Position: {okxPosition.Quantity}");
                     return null;
                 }
 

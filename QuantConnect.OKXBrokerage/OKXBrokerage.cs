@@ -111,12 +111,12 @@ namespace QuantConnect.Brokerages.OKX
                 var signature = OKXUtility.GenerateHmacSignature(signatureInput, ApiSecret);
 
                 // Build login message
-                var loginMessage = new Messages.OKXWebSocketMessage
+                var loginMessage = new Messages.WebSocketMessage
                 {
                     Operation = "login",
                     Arguments = new List<object>
                     {
-                        new Messages.OKXWebSocketLoginArgs
+                        new Messages.WebSocketLoginArgs
                         {
                             ApiKey = ApiKey,
                             Passphrase = Passphrase,
@@ -150,13 +150,13 @@ namespace QuantConnect.Brokerages.OKX
 
                 // Subscribe to orders channel for all instrument types
                 // This provides real-time order updates and fill information
-                var ordersChannel = new Messages.OKXWebSocketChannel
+                var ordersChannel = new Messages.WebSocketChannel
                 {
                     Channel = "orders",
                     InstrumentType = "ANY"  // Subscribe to all instrument types (SPOT, SWAP, FUTURES, etc.)
                 };
 
-                var subscribeMessage = new Messages.OKXWebSocketMessage
+                var subscribeMessage = new Messages.WebSocketMessage
                 {
                     Operation = "subscribe",
                     Arguments = new List<object> { ordersChannel }

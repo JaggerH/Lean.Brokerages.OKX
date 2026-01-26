@@ -24,6 +24,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 
+using OKXWsMessage = QuantConnect.Brokerages.OKX.Messages.WebSocketMessage;
+
 namespace QuantConnect.Brokerages.OKX.WebSocket
 {
     /// <summary>
@@ -56,32 +58,32 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
         /// <summary>
         /// Event fired when a ticker message is received
         /// </summary>
-        public event EventHandler<OKXWebSocketTicker> TickerReceived;
+        public event EventHandler<WebSocketTicker> TickerReceived;
 
         /// <summary>
         /// Event fired when a trade message is received
         /// </summary>
-        public event EventHandler<OKXWebSocketTrade> TradeReceived;
+        public event EventHandler<WebSocketTrade> TradeReceived;
 
         /// <summary>
         /// Event fired when an orderbook message is received
         /// </summary>
-        public event EventHandler<OKXWebSocketOrderBook> OrderBookReceived;
+        public event EventHandler<WebSocketOrderBook> OrderBookReceived;
 
         /// <summary>
         /// Event fired when an order update is received
         /// </summary>
-        public event EventHandler<OKXWebSocketOrder> OrderReceived;
+        public event EventHandler<WebSocketOrder> OrderReceived;
 
         /// <summary>
         /// Event fired when an account update is received
         /// </summary>
-        public event EventHandler<OKXWebSocketAccount> AccountReceived;
+        public event EventHandler<WebSocketAccount> AccountReceived;
 
         /// <summary>
         /// Event fired when a position update is received
         /// </summary>
-        public event EventHandler<OKXWebSocketPosition> PositionReceived;
+        public event EventHandler<WebSocketPosition> PositionReceived;
 
         /// <summary>
         /// Creates a new OKX WebSocket client
@@ -246,7 +248,7 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
             }
 
             // Create subscription message
-            var channelArg = new OKXWebSocketChannel
+            var channelArg = new WebSocketChannel
             {
                 Channel = channel
             };
@@ -257,7 +259,7 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
                 channelArg.InstrumentId = instId;
             }
 
-            var subscribeMessage = new OKXWebSocketMessage
+            var subscribeMessage = new OKXWsMessage
             {
                 Operation = "subscribe",
                 Arguments = new List<object> { channelArg }
@@ -287,12 +289,12 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
             _channelSubscriptions.RemoveSubscription(channel, instId);
 
             // Create unsubscription message
-            var unsubscribeMessage = new OKXWebSocketMessage
+            var unsubscribeMessage = new OKXWsMessage
             {
                 Operation = "unsubscribe",
                 Arguments = new List<object>
                 {
-                    new OKXWebSocketChannel
+                    new WebSocketChannel
                     {
                         Channel = channel,
                         InstrumentId = instId
@@ -321,12 +323,12 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
             var signature = Sign(signatureInput, _apiSecret);
 
             // Create login message
-            var loginMessage = new OKXWebSocketMessage
+            var loginMessage = new OKXWsMessage
             {
                 Operation = "login",
                 Arguments = new List<object>
                 {
-                    new OKXWebSocketLoginArgs
+                    new WebSocketLoginArgs
                     {
                         ApiKey = _apiKey,
                         Passphrase = _passphrase,
@@ -464,7 +466,7 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
 
         private void HandleEventResponse(JObject jObject)
         {
-            var response = jObject.ToObject<OKXWebSocketResponse>();
+            var response = jObject.ToObject<WebSocketResponse>();
 
             if (response.Event == "login")
             {
@@ -501,7 +503,7 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
 
         private void HandleDataMessage(JObject jObject)
         {
-            var arg = jObject["arg"].ToObject<OKXWebSocketChannel>();
+            var arg = jObject["arg"].ToObject<WebSocketChannel>();
             var channel = arg.Channel;
 
             // Route to appropriate handler based on channel
@@ -535,7 +537,7 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
 
         private void HandleTickerMessage(JObject jObject)
         {
-            var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketTicker>>();
+            var message = jObject.ToObject<WebSocketDataMessage<WebSocketTicker>>();
             if (message.Data != null && message.Data.Count > 0)
             {
                 foreach (var ticker in message.Data)
@@ -547,7 +549,7 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
 
         private void HandleTradeMessage(JObject jObject)
         {
-            var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketTrade>>();
+            var message = jObject.ToObject<WebSocketDataMessage<WebSocketTrade>>();
             if (message.Data != null && message.Data.Count > 0)
             {
                 foreach (var trade in message.Data)
@@ -559,7 +561,7 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
 
         private void HandleOrderBookMessage(JObject jObject)
         {
-            var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketOrderBook>>();
+            var message = jObject.ToObject<WebSocketDataMessage<WebSocketOrderBook>>();
             if (message.Data != null && message.Data.Count > 0)
             {
                 foreach (var orderBook in message.Data)
@@ -571,7 +573,7 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
 
         private void HandleOrderMessage(JObject jObject)
         {
-            var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketOrder>>();
+            var message = jObject.ToObject<WebSocketDataMessage<WebSocketOrder>>();
             if (message.Data != null && message.Data.Count > 0)
             {
                 foreach (var order in message.Data)
@@ -583,7 +585,7 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
 
         private void HandleAccountMessage(JObject jObject)
         {
-            var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketAccount>>();
+            var message = jObject.ToObject<WebSocketDataMessage<WebSocketAccount>>();
             if (message.Data != null && message.Data.Count > 0)
             {
                 foreach (var account in message.Data)
@@ -595,7 +597,7 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
 
         private void HandlePositionMessage(JObject jObject)
         {
-            var message = jObject.ToObject<OKXWebSocketDataMessage<OKXWebSocketPosition>>();
+            var message = jObject.ToObject<WebSocketDataMessage<WebSocketPosition>>();
             if (message.Data != null && message.Data.Count > 0)
             {
                 foreach (var position in message.Data)

@@ -86,7 +86,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             var publicUrl = OKXEnvironment.GetWebSocketPublicUrl();
             using var client = new OKXWebSocketClient(publicUrl, isPrivateChannel: false);
 
-            var tickersReceived = new List<OKXWebSocketTicker>();
+            var tickersReceived = new List<WebSocketTicker>();
             client.TickerReceived += (sender, ticker) =>
             {
                 tickersReceived.Add(ticker);
@@ -120,7 +120,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             var publicUrl = OKXEnvironment.GetWebSocketPublicUrl();
             using var client = new OKXWebSocketClient(publicUrl, isPrivateChannel: false);
 
-            var tradesReceived = new List<OKXWebSocketTrade>();
+            var tradesReceived = new List<WebSocketTrade>();
             client.TradeReceived += (sender, trade) =>
             {
                 tradesReceived.Add(trade);
@@ -154,7 +154,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             var publicUrl = OKXEnvironment.GetWebSocketPublicUrl();
             using var client = new OKXWebSocketClient(publicUrl, isPrivateChannel: false);
 
-            var orderbooksReceived = new List<OKXWebSocketOrderBook>();
+            var orderbooksReceived = new List<WebSocketOrderBook>();
             client.OrderBookReceived += (sender, orderbook) =>
             {
                 orderbooksReceived.Add(orderbook);
@@ -189,8 +189,8 @@ namespace QuantConnect.Brokerages.OKX.Tests
             var publicUrl = OKXEnvironment.GetWebSocketPublicUrl();
             using var client = new OKXWebSocketClient(publicUrl, isPrivateChannel: false);
 
-            var btcTickers = new List<OKXWebSocketTicker>();
-            var ethTickers = new List<OKXWebSocketTicker>();
+            var btcTickers = new List<WebSocketTicker>();
+            var ethTickers = new List<WebSocketTicker>();
 
             client.TickerReceived += (sender, ticker) =>
             {
@@ -302,7 +302,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 _passphrase,
                 isPrivateChannel: true);
 
-            var accountUpdates = new List<OKXWebSocketAccount>();
+            var accountUpdates = new List<WebSocketAccount>();
             client.AccountReceived += (sender, account) =>
             {
                 accountUpdates.Add(account);
@@ -338,7 +338,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 _passphrase,
                 isPrivateChannel: true);
 
-            var orderUpdates = new List<OKXWebSocketOrder>();
+            var orderUpdates = new List<WebSocketOrder>();
             client.OrderReceived += (sender, order) =>
             {
                 orderUpdates.Add(order);
@@ -373,7 +373,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 _passphrase,
                 isPrivateChannel: true);
 
-            var positionUpdates = new List<OKXWebSocketPosition>();
+            var positionUpdates = new List<WebSocketPosition>();
             client.PositionReceived += (sender, position) =>
             {
                 positionUpdates.Add(position);

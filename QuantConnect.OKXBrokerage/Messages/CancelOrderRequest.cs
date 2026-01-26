@@ -21,7 +21,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// OKX v5 API cancel order request
     /// https://www.okx.com/docs-v5/en/#rest-api-trade-cancel-order
     /// </summary>
-    public class OKXCancelOrderRequest
+    public class CancelOrderRequest
     {
         /// <summary>
         /// Instrument ID (e.g., BTC-USDT, BTC-USDT-SWAP)
@@ -45,7 +45,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// <summary>
     /// OKX v5 API cancel order response
     /// </summary>
-    public class OKXCancelOrderResponse
+    public class CancelOrderResponse
     {
         /// <summary>
         /// Order ID

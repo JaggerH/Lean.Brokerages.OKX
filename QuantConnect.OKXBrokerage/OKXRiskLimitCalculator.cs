@@ -134,7 +134,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <param name="contract">Contract name for logging</param>
         /// <returns>Effective position value in USD</returns>
         private decimal CalculateEffectivePositionValue(
-            OKXPosition position,
+            Position position,
             List<OrderTicket> openOrderTickets,
             string contract)
         {
@@ -143,8 +143,8 @@ namespace QuantConnect.Brokerages.OKX
             decimal markPrice = 0m;
 
             if (position != null &&
-                !string.IsNullOrEmpty(position.Position) &&
-                decimal.TryParse(position.Position, NumberStyles.Any, CultureInfo.InvariantCulture, out var posSize) &&
+                !string.IsNullOrEmpty(position.Quantity) &&
+                decimal.TryParse(position.Quantity, NumberStyles.Any, CultureInfo.InvariantCulture, out var posSize) &&
                 posSize != 0)
             {
                 // Calculate position value from size and price

@@ -18,10 +18,10 @@ using Newtonsoft.Json;
 namespace QuantConnect.Brokerages.OKX.Messages
 {
     /// <summary>
-    /// OKX v5 API place order request
-    /// https://www.okx.com/docs-v5/en/#rest-api-trade-place-order
+    /// OKX v5 API amend order request
+    /// https://www.okx.com/docs-v5/en/#rest-api-trade-amend-order
     /// </summary>
-    public class OKXPlaceOrderRequest
+    public class AmendOrderRequest
     {
         /// <summary>
         /// Instrument ID (e.g., BTC-USDT, BTC-USDT-SWAP)
@@ -30,78 +30,46 @@ namespace QuantConnect.Brokerages.OKX.Messages
         public string InstrumentId { get; set; }
 
         /// <summary>
-        /// Trade mode: cash, cross, isolated
+        /// Order ID (either ordId or clOrdId is required)
         /// </summary>
-        [JsonProperty("tdMode")]
-        public string TradeMode { get; set; }
+        [JsonProperty("ordId", NullValueHandling = NullValueHandling.Ignore)]
+        public string OrderId { get; set; }
 
         /// <summary>
-        /// Order side: buy or sell
-        /// </summary>
-        [JsonProperty("side")]
-        public string Side { get; set; }
-
-        /// <summary>
-        /// Order type: market, limit, post_only, fok, ioc
-        /// </summary>
-        [JsonProperty("ordType")]
-        public string OrderType { get; set; }
-
-        /// <summary>
-        /// Order size (quantity)
-        /// </summary>
-        [JsonProperty("sz")]
-        public string Size { get; set; }
-
-        /// <summary>
-        /// Order price (required for limit orders)
-        /// </summary>
-        [JsonProperty("px", NullValueHandling = NullValueHandling.Ignore)]
-        public string Price { get; set; }
-
-        /// <summary>
-        /// Client-supplied order ID (optional)
+        /// Client order ID (either ordId or clOrdId is required)
         /// </summary>
         [JsonProperty("clOrdId", NullValueHandling = NullValueHandling.Ignore)]
         public string ClientOrderId { get; set; }
 
         /// <summary>
-        /// Order tag (optional, user-defined)
+        /// New order size (optional)
         /// </summary>
-        [JsonProperty("tag", NullValueHandling = NullValueHandling.Ignore)]
-        public string Tag { get; set; }
+        [JsonProperty("newSz", NullValueHandling = NullValueHandling.Ignore)]
+        public string NewSize { get; set; }
 
         /// <summary>
-        /// Target currency for order size (base_ccy or quote_ccy)
-        /// Required for market orders to specify size in base currency
-        /// Always use base currency for all market orders for consistency
+        /// New order price (optional)
         /// </summary>
-        [JsonProperty("tgtCcy", NullValueHandling = NullValueHandling.Ignore)]
-        public string TargetCurrency { get; set; }
+        [JsonProperty("newPx", NullValueHandling = NullValueHandling.Ignore)]
+        public string NewPrice { get; set; }
     }
 
     /// <summary>
-    /// OKX v5 API place order response
+    /// OKX v5 API amend order response
     /// </summary>
-    public class OKXPlaceOrderResponse
+    public class AmendOrderResponse
     {
         /// <summary>
-        /// Order ID assigned by OKX
+        /// Order ID
         /// </summary>
         [JsonProperty("ordId")]
         public string OrderId { get; set; }
 
         /// <summary>
-        /// Client order ID (if provided in request)
+        /// Client order ID (if provided)
         /// </summary>
         [JsonProperty("clOrdId")]
         public string ClientOrderId { get; set; }
-
-        /// <summary>
-        /// Order tag (if provided in request)
-        /// </summary>
-        [JsonProperty("tag")]
-        public string Tag { get; set; }
 
         /// <summary>
         /// Response code (0 = success)

@@ -176,7 +176,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// <param name="instType">Instrument type: MARGIN, SWAP, FUTURES, OPTION (optional)</param>
         /// <param name="instId">Instrument ID (optional, e.g., BTC-USDT-SWAP)</param>
         /// <returns>List of positions, or empty list if request fails</returns>
-        public List<OKXPosition> GetPositions(string instType = null, string instId = null)
+        public List<Position> GetPositions(string instType = null, string instId = null)
         {
             try
             {
@@ -190,7 +190,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
 
                 var queryString = queryParams.Count > 0 ? string.Join("&", queryParams) : "";
 
-                var response = Get<OKXApiResponse<OKXPosition>>(
+                var response = Get<OKXApiResponse<Position>>(
                     "/account/positions",
                     queryString,
                     defaultValue: null);
@@ -198,15 +198,15 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 if (response == null || !response.IsSuccess)
                 {
                     Log.Error($"OKXRestApiClient.GetPositions(): Failed to get positions - code: {response?.Code}, msg: {response?.Message}");
-                    return new List<OKXPosition>();
+                    return new List<Position>();
                 }
 
-                return response.Data ?? new List<OKXPosition>();
+                return response.Data ?? new List<Position>();
             }
             catch (Exception ex)
             {
                 Log.Error($"OKXRestApiClient.GetPositions(): Exception: {ex.Message}");
-                return new List<OKXPosition>();
+                return new List<Position>();
             }
         }
 
@@ -504,7 +504,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// <param name="instType">Instrument type: SPOT, MARGIN, SWAP, FUTURES, OPTION (optional)</param>
         /// <param name="instId">Instrument ID (optional, e.g., BTC-USDT)</param>
         /// <returns>List of pending orders, or empty list if request fails</returns>
-        public List<OKXOrder> GetPendingOrders(string instType = null, string instId = null)
+        public List<Order> GetPendingOrders(string instType = null, string instId = null)
         {
             try
             {
@@ -518,7 +518,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
 
                 var queryString = queryParams.Count > 0 ? string.Join("&", queryParams) : "";
 
-                var response = Get<OKXApiResponse<OKXOrder>>(
+                var response = Get<OKXApiResponse<Order>>(
                     "/trade/orders-pending",
                     queryString,
                     defaultValue: null);
@@ -526,15 +526,15 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 if (response == null || !response.IsSuccess)
                 {
                     Log.Error($"OKXRestApiClient.GetPendingOrders(): Failed to get pending orders - code: {response?.Code}, msg: {response?.Message}");
-                    return new List<OKXOrder>();
+                    return new List<Order>();
                 }
 
-                return response.Data ?? new List<OKXOrder>();
+                return response.Data ?? new List<Order>();
             }
             catch (Exception ex)
             {
                 Log.Error($"OKXRestApiClient.GetPendingOrders(): Exception: {ex.Message}");
-                return new List<OKXOrder>();
+                return new List<Order>();
             }
         }
 
@@ -545,13 +545,13 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// </summary>
         /// <param name="ccy">Currency (optional, e.g., USDT, BTC). If null, returns all currencies</param>
         /// <returns>Account balance data, or null if request fails</returns>
-        public OKXAccountBalance GetAccountBalance(string ccy = null)
+        public AccountBalance GetAccountBalance(string ccy = null)
         {
             try
             {
                 var queryString = !string.IsNullOrEmpty(ccy) ? $"ccy={ccy}" : "";
 
-                var response = Get<OKXApiResponse<OKXAccountBalance>>(
+                var response = Get<OKXApiResponse<AccountBalance>>(
                     "/account/balance",
                     queryString,
                     defaultValue: null);
@@ -582,11 +582,11 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// </summary>
         /// <param name="request">Order request</param>
         /// <returns>Order result containing success status and error details</returns>
-        public OKXOrderResult<OKXPlaceOrderResponse> PlaceOrder(OKXPlaceOrderRequest request)
+        public OrderResult<PlaceOrderResponse> PlaceOrder(PlaceOrderRequest request)
         {
             try
             {
-                var response = Post<OKXApiResponse<OKXPlaceOrderResponse>>(
+                var response = Post<OKXApiResponse<PlaceOrderResponse>>(
                     "/trade/order",
                     request,
                     defaultValue: null);
@@ -596,7 +596,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 if (response == null || response.Data == null || response.Data.Count == 0)
                 {
                     Log.Error($"OKXRestApiClient.PlaceOrder(): Failed - code: {response?.Code}, msg: {response?.Message}");
-                    return new OKXOrderResult<OKXPlaceOrderResponse>
+                    return new OrderResult<PlaceOrderResponse>
                     {
                         IsSuccess = false,
                         HttpCode = response?.Code ?? "NETWORK_ERROR",
@@ -610,7 +610,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 if (orderResponse.StatusCode != "0")
                 {
                     Log.Error($"OKXRestApiClient.PlaceOrder(): Rejected - sCode: {orderResponse.StatusCode}, sMsg: {orderResponse.StatusMessage}");
-                    return new OKXOrderResult<OKXPlaceOrderResponse>
+                    return new OrderResult<PlaceOrderResponse>
                     {
                         IsSuccess = false,
                         Data = orderResponse,  // Still return data (contains error codes)
@@ -622,7 +622,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 }
 
                 // Success
-                return new OKXOrderResult<OKXPlaceOrderResponse>
+                return new OrderResult<PlaceOrderResponse>
                 {
                     IsSuccess = true,
                     Data = orderResponse,
@@ -633,7 +633,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             catch (Exception ex)
             {
                 Log.Error($"OKXRestApiClient.PlaceOrder(): Exception: {ex.Message}");
-                return new OKXOrderResult<OKXPlaceOrderResponse>
+                return new OrderResult<PlaceOrderResponse>
                 {
                     IsSuccess = false,
                     HttpCode = "EXCEPTION",
@@ -649,11 +649,11 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// </summary>
         /// <param name="request">Amend order request</param>
         /// <returns>Order result containing success status and error details</returns>
-        public OKXOrderResult<OKXAmendOrderResponse> AmendOrder(OKXAmendOrderRequest request)
+        public OrderResult<AmendOrderResponse> AmendOrder(AmendOrderRequest request)
         {
             try
             {
-                var response = Post<OKXApiResponse<OKXAmendOrderResponse>>(
+                var response = Post<OKXApiResponse<AmendOrderResponse>>(
                     "/trade/amend-order",
                     request,
                     defaultValue: null);
@@ -663,7 +663,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 if (response == null || response.Data == null || response.Data.Count == 0)
                 {
                     Log.Error($"OKXRestApiClient.AmendOrder(): Failed - code: {response?.Code}, msg: {response?.Message}");
-                    return new OKXOrderResult<OKXAmendOrderResponse>
+                    return new OrderResult<AmendOrderResponse>
                     {
                         IsSuccess = false,
                         HttpCode = response?.Code ?? "NETWORK_ERROR",
@@ -677,7 +677,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 if (amendResponse.StatusCode != "0")
                 {
                     Log.Error($"OKXRestApiClient.AmendOrder(): Rejected - sCode: {amendResponse.StatusCode}, sMsg: {amendResponse.StatusMessage}");
-                    return new OKXOrderResult<OKXAmendOrderResponse>
+                    return new OrderResult<AmendOrderResponse>
                     {
                         IsSuccess = false,
                         Data = amendResponse,
@@ -689,7 +689,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 }
 
                 // Success
-                return new OKXOrderResult<OKXAmendOrderResponse>
+                return new OrderResult<AmendOrderResponse>
                 {
                     IsSuccess = true,
                     Data = amendResponse,
@@ -700,7 +700,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             catch (Exception ex)
             {
                 Log.Error($"OKXRestApiClient.AmendOrder(): Exception: {ex.Message}");
-                return new OKXOrderResult<OKXAmendOrderResponse>
+                return new OrderResult<AmendOrderResponse>
                 {
                     IsSuccess = false,
                     HttpCode = "EXCEPTION",
@@ -716,11 +716,11 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// </summary>
         /// <param name="request">Cancel order request</param>
         /// <returns>Order result containing success status and error details</returns>
-        public OKXOrderResult<OKXCancelOrderResponse> CancelOrder(OKXCancelOrderRequest request)
+        public OrderResult<CancelOrderResponse> CancelOrder(CancelOrderRequest request)
         {
             try
             {
-                var response = Post<OKXApiResponse<OKXCancelOrderResponse>>(
+                var response = Post<OKXApiResponse<CancelOrderResponse>>(
                     "/trade/cancel-order",
                     request,
                     defaultValue: null);
@@ -730,7 +730,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 if (response == null || response.Data == null || response.Data.Count == 0)
                 {
                     Log.Error($"OKXRestApiClient.CancelOrder(): Failed - code: {response?.Code}, msg: {response?.Message}");
-                    return new OKXOrderResult<OKXCancelOrderResponse>
+                    return new OrderResult<CancelOrderResponse>
                     {
                         IsSuccess = false,
                         HttpCode = response?.Code ?? "NETWORK_ERROR",
@@ -744,7 +744,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 if (cancelResponse.StatusCode != "0")
                 {
                     Log.Error($"OKXRestApiClient.CancelOrder(): Rejected - sCode: {cancelResponse.StatusCode}, sMsg: {cancelResponse.StatusMessage}");
-                    return new OKXOrderResult<OKXCancelOrderResponse>
+                    return new OrderResult<CancelOrderResponse>
                     {
                         IsSuccess = false,
                         Data = cancelResponse,
@@ -756,7 +756,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 }
 
                 // Success
-                return new OKXOrderResult<OKXCancelOrderResponse>
+                return new OrderResult<CancelOrderResponse>
                 {
                     IsSuccess = true,
                     Data = cancelResponse,
@@ -767,7 +767,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             catch (Exception ex)
             {
                 Log.Error($"OKXRestApiClient.CancelOrder(): Exception: {ex.Message}");
-                return new OKXOrderResult<OKXCancelOrderResponse>
+                return new OrderResult<CancelOrderResponse>
                 {
                     IsSuccess = false,
                     HttpCode = "EXCEPTION",

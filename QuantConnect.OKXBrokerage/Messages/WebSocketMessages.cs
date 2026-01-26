@@ -21,7 +21,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// <summary>
     /// Base WebSocket message for OKX v5 API
     /// </summary>
-    public class OKXWebSocketMessage
+    public class WebSocketMessage
     {
         /// <summary>
         /// Operation type: subscribe, unsubscribe, login
@@ -39,7 +39,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// <summary>
     /// WebSocket response from OKX
     /// </summary>
-    public class OKXWebSocketResponse
+    public class WebSocketResponse
     {
         /// <summary>
         /// Event type: subscribe, unsubscribe, error, login
@@ -69,13 +69,13 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// Channel argument (for subscribe/unsubscribe responses)
         /// </summary>
         [JsonProperty("arg", NullValueHandling = NullValueHandling.Ignore)]
-        public OKXWebSocketChannel Arg { get; set; }
+        public WebSocketChannel Arg { get; set; }
     }
 
     /// <summary>
     /// Channel subscription argument
     /// </summary>
-    public class OKXWebSocketChannel
+    public class WebSocketChannel
     {
         /// <summary>
         /// Channel name (e.g., "tickers", "trades", "books5", "orders")
@@ -101,7 +101,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// <summary>
     /// Login authentication arguments
     /// </summary>
-    public class OKXWebSocketLoginArgs
+    public class WebSocketLoginArgs
     {
         /// <summary>
         /// API Key
@@ -131,13 +131,13 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// <summary>
     /// Data message from WebSocket (tickers, trades, orderbook, orders, etc.)
     /// </summary>
-    public class OKXWebSocketDataMessage<T>
+    public class WebSocketDataMessage<T>
     {
         /// <summary>
         /// Argument that identifies the channel
         /// </summary>
         [JsonProperty("arg")]
-        public OKXWebSocketChannel Arg { get; set; }
+        public WebSocketChannel Arg { get; set; }
 
         /// <summary>
         /// Data array for this message
@@ -155,7 +155,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// <summary>
     /// Ticker data from WebSocket
     /// </summary>
-    public class OKXWebSocketTicker
+    public class WebSocketTicker
     {
         /// <summary>
         /// Instrument ID
@@ -209,7 +209,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// <summary>
     /// Trade data from WebSocket
     /// </summary>
-    public class OKXWebSocketTrade
+    public class WebSocketTrade
     {
         /// <summary>
         /// Instrument ID
@@ -251,7 +251,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// <summary>
     /// Order book data from WebSocket
     /// </summary>
-    public class OKXWebSocketOrderBook
+    public class WebSocketOrderBook
     {
         /// <summary>
         /// Instrument ID
@@ -300,7 +300,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// <summary>
     /// Order update from WebSocket (private channel)
     /// </summary>
-    public class OKXWebSocketOrder
+    public class WebSocketOrder
     {
         /// <summary>
         /// Instrument ID
@@ -428,7 +428,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// <summary>
     /// Account update from WebSocket (private channel)
     /// </summary>
-    public class OKXWebSocketAccount
+    public class WebSocketAccount
     {
         /// <summary>
         /// Update timestamp
@@ -446,13 +446,13 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// Currency details
         /// </summary>
         [JsonProperty("details")]
-        public List<OKXWebSocketAccountDetail> Details { get; set; }
+        public List<WebSocketAccountDetail> Details { get; set; }
     }
 
     /// <summary>
     /// Account detail for a specific currency
     /// </summary>
-    public class OKXWebSocketAccountDetail
+    public class WebSocketAccountDetail
     {
         /// <summary>
         /// Currency
@@ -488,7 +488,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// <summary>
     /// Position update from WebSocket (private channel)
     /// </summary>
-    public class OKXWebSocketPosition
+    public class WebSocketPosition
     {
         /// <summary>
         /// Instrument ID
@@ -506,7 +506,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// Position size
         /// </summary>
         [JsonProperty("pos")]
-        public string Position { get; set; }
+        public string Quantity { get; set; }
 
         /// <summary>
         /// Available position

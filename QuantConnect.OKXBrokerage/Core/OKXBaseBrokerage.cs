@@ -470,12 +470,12 @@ namespace QuantConnect.Brokerages.OKX
                 // OKX v5 API subscription format: { "op": "subscribe", "args": [ { "channel": "...", "instId": "..." } ] }
                 // Subscribe to books channel (400-level orderbook depth)
                 // books: 首次推400档快照数据，以后增量推送，每100毫秒推送一次变化的数据
-                var bookSubscribeMessage = new Messages.OKXWebSocketMessage
+                var bookSubscribeMessage = new Messages.WebSocketMessage
                 {
                     Operation = "subscribe",
                     Arguments = new List<object>
                     {
-                        new Messages.OKXWebSocketChannel
+                        new Messages.WebSocketChannel
                         {
                             Channel = "books",
                             InstrumentId = brokerageSymbol
@@ -485,12 +485,12 @@ namespace QuantConnect.Brokerages.OKX
                 webSocket.Send(JsonConvert.SerializeObject(bookSubscribeMessage));
 
                 // Subscribe to trades channel
-                var tradesSubscribeMessage = new Messages.OKXWebSocketMessage
+                var tradesSubscribeMessage = new Messages.WebSocketMessage
                 {
                     Operation = "subscribe",
                     Arguments = new List<object>
                     {
-                        new Messages.OKXWebSocketChannel
+                        new Messages.WebSocketChannel
                         {
                             Channel = "trades",
                             InstrumentId = brokerageSymbol
@@ -524,12 +524,12 @@ namespace QuantConnect.Brokerages.OKX
 
                 // OKX v5 API unsubscription format
                 // Unsubscribe from books channel
-                var bookUnsubscribeMessage = new Messages.OKXWebSocketMessage
+                var bookUnsubscribeMessage = new Messages.WebSocketMessage
                 {
                     Operation = "unsubscribe",
                     Arguments = new List<object>
                     {
-                        new Messages.OKXWebSocketChannel
+                        new Messages.WebSocketChannel
                         {
                             Channel = "books",
                             InstrumentId = brokerageSymbol
@@ -565,12 +565,12 @@ namespace QuantConnect.Brokerages.OKX
                 _orderBooks.TryRemove(symbol, out _);
 
                 // Unsubscribe from trades channel
-                var tradesUnsubscribeMessage = new Messages.OKXWebSocketMessage
+                var tradesUnsubscribeMessage = new Messages.WebSocketMessage
                 {
                     Operation = "unsubscribe",
                     Arguments = new List<object>
                     {
-                        new Messages.OKXWebSocketChannel
+                        new Messages.WebSocketChannel
                         {
                             Channel = "trades",
                             InstrumentId = brokerageSymbol

@@ -20,8 +20,8 @@ namespace QuantConnect.Brokerages.OKX.Messages
     /// Contains both success data and detailed error information
     /// Follows Binance brokerage pattern for comprehensive error reporting
     /// </summary>
-    /// <typeparam name="T">The type of order response (OKXPlaceOrderResponse, OKXAmendOrderResponse, OKXCancelOrderResponse)</typeparam>
-    public class OKXOrderResult<T>
+    /// <typeparam name="T">The type of order response (PlaceOrderResponse, AmendOrderResponse, CancelOrderResponse)</typeparam>
+    public class OrderResult<T>
     {
         /// <summary>
         /// Indicates whether the order operation was successful
@@ -46,7 +46,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
         public string HttpMessage { get; set; }
 
         /// <summary>
-        /// Order-level status code from OKXPlaceOrderResponse.StatusCode (sCode)
+        /// Order-level status code from PlaceOrderResponse.StatusCode (sCode)
         /// "0" = success, non-zero = order rejected by trading engine
         /// Common codes:
         /// - "51000": Order parameter error
@@ -57,7 +57,7 @@ namespace QuantConnect.Brokerages.OKX.Messages
         public string OrderStatusCode { get; set; }
 
         /// <summary>
-        /// Order-level status message from OKXPlaceOrderResponse.StatusMessage (sMsg)
+        /// Order-level status message from PlaceOrderResponse.StatusMessage (sMsg)
         /// Specific reason why order was rejected by trading engine
         /// </summary>
         public string OrderStatusMessage { get; set; }
