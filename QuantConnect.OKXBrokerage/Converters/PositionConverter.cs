@@ -14,7 +14,6 @@
 */
 
 using System;
-using System.Globalization;
 using QuantConnect.Brokerages.OKX.Messages;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
@@ -44,7 +43,8 @@ namespace QuantConnect.Brokerages.OKX.Converters
             try
             {
                 // Parse position quantity
-                if (!decimal.TryParse(okxPosition.Quantity, NumberStyles.Any, CultureInfo.InvariantCulture, out var quantity))
+                var quantity = ParseHelper.ParseDecimal(okxPosition.Quantity);
+                if (quantity == 0 && !string.IsNullOrEmpty(okxPosition.Quantity) && okxPosition.Quantity != "0")
                 {
                     Log.Error($"PositionConverter.ToHolding(): Failed to parse Position: {okxPosition.Quantity}");
                     return null;
@@ -66,18 +66,15 @@ namespace QuantConnect.Brokerages.OKX.Converters
                     Market.OKX);
 
                 // Parse average price
-                if (!decimal.TryParse(okxPosition.AveragePrice, NumberStyles.Any, CultureInfo.InvariantCulture, out var averagePrice))
+                var averagePrice = ParseHelper.ParseDecimal(okxPosition.AveragePrice);
+                if (averagePrice == 0 && !string.IsNullOrEmpty(okxPosition.AveragePrice))
                 {
                     Log.Error($"PositionConverter.ToHolding(): Failed to parse AveragePrice: {okxPosition.AveragePrice}");
                     return null;
                 }
 
                 // Parse market price (last price or mark price)
-                decimal marketPrice = 0;
-                if (!string.IsNullOrEmpty(okxPosition.LastPrice))
-                {
-                    decimal.TryParse(okxPosition.LastPrice, NumberStyles.Any, CultureInfo.InvariantCulture, out marketPrice);
-                }
+                var marketPrice = ParseHelper.ParseDecimal(okxPosition.LastPrice);
 
                 // If market price not available, use average price
                 if (marketPrice == 0)
@@ -90,11 +87,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
                 var marketValue = quantity * marketPrice;
 
                 // Parse unrealized PnL
-                decimal unrealizedPnL = 0;
-                if (!string.IsNullOrEmpty(okxPosition.UnrealizedPnL))
-                {
-                    decimal.TryParse(okxPosition.UnrealizedPnL, NumberStyles.Any, CultureInfo.InvariantCulture, out unrealizedPnL);
-                }
+                var unrealizedPnL = ParseHelper.ParseDecimal(okxPosition.UnrealizedPnL);
 
                 // Create holding
                 var holding = new Holding

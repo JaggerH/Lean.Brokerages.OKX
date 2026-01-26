@@ -14,13 +14,12 @@
 */
 
 using System;
-using System.Globalization;
 using QuantConnect.Brokerages.OKX.Messages;
-using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
+using QuantConnect.TradingPairs;
 
 using LeanOrder = QuantConnect.Orders.Order;
 using OKXOrder = QuantConnect.Brokerages.OKX.Messages.Order;
@@ -58,7 +57,8 @@ namespace QuantConnect.Brokerages.OKX.Converters
                     Market.OKX);
 
                 // Parse numeric fields
-                if (!decimal.TryParse(okxOrder.Size, NumberStyles.Any, CultureInfo.InvariantCulture, out var quantity))
+                var quantity = ParseHelper.ParseDecimal(okxOrder.Size);
+                if (quantity == 0 && !string.IsNullOrEmpty(okxOrder.Size))
                 {
                     Log.Error($"OrderConverter.ToLeanOrder(): Failed to parse Size: {okxOrder.Size}");
                     return null;
@@ -71,14 +71,10 @@ namespace QuantConnect.Brokerages.OKX.Converters
                 }
 
                 // Parse filled quantity
-                decimal filledQuantity = 0;
-                if (!string.IsNullOrEmpty(okxOrder.AccumulatedFillSize))
+                var filledQuantity = ParseHelper.ParseDecimal(okxOrder.AccumulatedFillSize);
+                if (filledQuantity != 0 && okxOrder.Side.Equals("sell", StringComparison.OrdinalIgnoreCase))
                 {
-                    decimal.TryParse(okxOrder.AccumulatedFillSize, NumberStyles.Any, CultureInfo.InvariantCulture, out filledQuantity);
-                    if (okxOrder.Side.Equals("sell", StringComparison.OrdinalIgnoreCase))
-                    {
-                        filledQuantity = -filledQuantity;
-                    }
+                    filledQuantity = -filledQuantity;
                 }
 
                 // Parse order ID
@@ -102,7 +98,8 @@ namespace QuantConnect.Brokerages.OKX.Converters
 
                     case "limit":
                     case "post_only":
-                        if (!decimal.TryParse(okxOrder.Price, NumberStyles.Any, CultureInfo.InvariantCulture, out var limitPrice))
+                        var limitPrice = ParseHelper.ParseDecimal(okxOrder.Price);
+                        if (limitPrice == 0 && !string.IsNullOrEmpty(okxOrder.Price))
                         {
                             Log.Error($"OrderConverter.ToLeanOrder(): Failed to parse Price: {okxOrder.Price}");
                             return null;
@@ -233,12 +230,12 @@ namespace QuantConnect.Brokerages.OKX.Converters
             if (!string.IsNullOrEmpty(order.TradeId))
             {
                 // Parse fill data
-                decimal.TryParse(order.LastFillSize ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var lastFillSize);
-                decimal.TryParse(order.LastFillPrice ?? order.AveragePrice ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var lastFillPrice);
-                decimal.TryParse(order.LastFillFee ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var lastFillFee);
+                var lastFillSize = ParseHelper.ParseDecimal(order.LastFillSize);
+                var lastFillPrice = ParseHelper.ParseDecimal(order.LastFillPrice ?? order.AveragePrice);
+                var lastFillFee = ParseHelper.ParseDecimal(order.LastFillFee);
 
                 // Parse accumulated fill size to determine actual completion status
-                decimal.TryParse(order.FilledSize ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var accFillSize);
+                var accFillSize = ParseHelper.ParseDecimal(order.FilledSize);
                 var orderSize = Math.Abs(leanOrder.Quantity);
 
                 // Determine final status based on accumulated fill vs order size
@@ -274,7 +271,10 @@ namespace QuantConnect.Brokerages.OKX.Converters
                     signedFillQty,
                     new OrderFee(new CashAmount(Math.Abs(lastFillFee), feeCurrency)),
                     $"OKX order {order.OrderId}: {order.State} -> {finalStatus}, Fill: {lastFillSize} @ {lastFillPrice}, AccFill: {accFillSize}/{orderSize}, TradeId: {order.TradeId}"
-                );
+                )
+                {
+                    ExecutionId = order.TradeId
+                };
             }
 
             // No tradeId: state=filled means market order close event, ignore it
@@ -285,7 +285,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
             }
 
             // Other state changes (Submitted, Canceled, etc.)
-            long.TryParse(order.UpdateTime, out var updateTimeMs);
+            var updateTimeMs = ParseHelper.ParseLong(order.UpdateTime);
             if (updateTimeMs == 0)
             {
                 updateTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -327,6 +327,56 @@ namespace QuantConnect.Brokerages.OKX.Converters
                     Log.Error($"WebSocketOrderExtensions.ConvertOrderStatus(): Unknown OKX order state: {okxState}");
                     return OrderStatus.None;
             }
+        }
+    }
+
+    /// <summary>
+    /// Extension methods for converting OKX Fill records to LEAN ExecutionRecord
+    /// </summary>
+    public static class FillExtensions
+    {
+        /// <summary>
+        /// Converts OKX Fill to LEAN ExecutionRecord
+        /// </summary>
+        /// <param name="fill">OKX fill record</param>
+        /// <param name="symbolMapper">Symbol mapper for converting OKX symbols to LEAN symbols</param>
+        /// <returns>LEAN ExecutionRecord</returns>
+        public static ExecutionRecord ToExecutionRecord(this Fill fill, ISymbolMapper symbolMapper)
+        {
+            // Determine SecurityType from instrument type
+            var securityType = fill.InstrumentType?.ToUpperInvariant() switch
+            {
+                "SPOT" or "MARGIN" => SecurityType.Crypto,
+                "SWAP" or "FUTURES" => SecurityType.CryptoFuture,
+                "OPTION" => SecurityType.Option,
+                _ => SecurityType.Crypto
+            };
+
+            var symbol = symbolMapper.GetLeanSymbol(fill.InstrumentId, securityType, Market.OKX);
+
+            // Parse quantity (signed: buy=positive, sell=negative)
+            var size = ParseHelper.ParseDecimal(fill.FillSize);
+            var quantity = fill.Side?.ToLowerInvariant() == "buy" ? size : -size;
+
+            var price = ParseHelper.ParseDecimal(fill.FillPrice);
+            var fee = ParseHelper.ParseDecimal(fill.Fee);
+
+            // Use fillTime for execution time, fallback to ts
+            var timeStr = !string.IsNullOrEmpty(fill.FillTime) ? fill.FillTime : fill.Timestamp;
+            var timestampMs = ParseHelper.ParseLong(timeStr);
+
+            return new ExecutionRecord
+            {
+                ExecutionId = fill.TradeId,
+                Symbol = symbol,
+                Quantity = quantity,
+                Price = price,
+                TimeUtc = DateTimeOffset.FromUnixTimeMilliseconds(timestampMs).UtcDateTime,
+                OrderId = fill.OrderId,
+                Tag = fill.Tag,
+                Fee = Math.Abs(fee),
+                FeeCurrency = fill.FeeCurrency ?? "USDT"
+            };
         }
     }
 }

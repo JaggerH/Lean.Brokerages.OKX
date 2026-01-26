@@ -557,21 +557,6 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         // COMMON REST API METHODS
         // ========================================
 
-
-        /// <summary>
-        /// Gets order details by ID via REST API
-        /// Spot: https://www.okx.io/docs/developers/apiv4/en/#get-a-single-order
-        /// Futures: https://www.okx.io/docs/developers/futures/en/#get-a-single-order
-        /// </summary>
-        /// <param name="orderId">The broker order ID</param>
-        /// <param name="currencyPair">The currency pair (e.g., BTC_USDT)</param>
-        /// <returns>Order details or null if not found</returns>
-        public virtual Messages.SpotOrder GetOrderById(string orderId, string currencyPair)
-        {
-            var queryString = $"{SymbolParameterName}={currencyPair}";
-            return Get<Messages.SpotOrder>($"orders/{orderId}", queryString, defaultValue: null);
-        }
-
         /// <summary>
         /// Cancels an order via REST API
         /// Spot: https://www.okx.io/docs/developers/apiv4/en/#cancel-a-single-order

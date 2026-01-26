@@ -71,14 +71,14 @@ namespace QuantConnect.Brokerages.OKX.Converters
             {
                 return new Candle
                 {
-                    Timestamp = long.Parse(array[0].ToString()),
-                    Open = decimal.Parse(array[1].ToString()),
-                    High = decimal.Parse(array[2].ToString()),
-                    Low = decimal.Parse(array[3].ToString()),
-                    Close = decimal.Parse(array[4].ToString()),
-                    Volume = decimal.Parse(array[5].ToString()),
-                    VolumeQuote = decimal.Parse(array[6].ToString()),
-                    Confirm = array[8].ToString() == "1"
+                    Timestamp = ParseHelper.ParseLong(array[0]),
+                    Open = ParseHelper.ParseDecimal(array[1]),
+                    High = ParseHelper.ParseDecimal(array[2]),
+                    Low = ParseHelper.ParseDecimal(array[3]),
+                    Close = ParseHelper.ParseDecimal(array[4]),
+                    Volume = ParseHelper.ParseDecimal(array[5]),
+                    VolumeQuote = ParseHelper.ParseDecimal(array[6]),
+                    Confirm = ParseHelper.ParseBool(array[8])
                 };
             }
             catch (Exception ex)

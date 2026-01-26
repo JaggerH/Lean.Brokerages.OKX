@@ -74,14 +74,14 @@ namespace QuantConnect.Brokerages.OKX.Converters
             return new Ticker
             {
                 CurrencyPair = instId,  // OKX v5 uses instId
-                Last = obj["last"]?.Type == JTokenType.Null ? null : obj["last"]?.ToString(),
-                LowestAsk = string.IsNullOrEmpty(askPxStr) ? 0 : decimal.Parse(askPxStr),
-                HighestBid = string.IsNullOrEmpty(bidPxStr) ? 0 : decimal.Parse(bidPxStr),
-                ChangePercentage = obj["changePercentage"]?.Type == JTokenType.Null ? null : obj["changePercentage"]?.ToString(),
-                BaseVolume = obj["vol24h"]?.Type == JTokenType.Null ? null : obj["vol24h"]?.ToString(),
-                QuoteVolume = obj["volCcy24h"]?.Type == JTokenType.Null ? null : obj["volCcy24h"]?.ToString(),
-                High24h = obj["high24h"]?.Type == JTokenType.Null ? null : obj["high24h"]?.ToString(),
-                Low24h = obj["low24h"]?.Type == JTokenType.Null ? null : obj["low24h"]?.ToString()
+                Last = ParseHelper.ParseString(obj["last"]),
+                LowestAsk = ParseHelper.ParseDecimal(askPxStr),
+                HighestBid = ParseHelper.ParseDecimal(bidPxStr),
+                ChangePercentage = ParseHelper.ParseString(obj["changePercentage"]),
+                BaseVolume = ParseHelper.ParseString(obj["vol24h"]),
+                QuoteVolume = ParseHelper.ParseString(obj["volCcy24h"]),
+                High24h = ParseHelper.ParseString(obj["high24h"]),
+                Low24h = ParseHelper.ParseString(obj["low24h"])
             };
         }
 
