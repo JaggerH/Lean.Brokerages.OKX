@@ -473,7 +473,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         {
             // Arrange
             var restClient = new RestApi.OKXRestApiClient(_apiKey, _apiSecret, _passphrase);
-            var request = new Messages.OKXPlaceOrderRequest
+            var request = new Messages.PlaceOrderRequest
             {
                 InstrumentId = "BTC-USDT",
                 TradeMode = "cash",
@@ -498,7 +498,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
             // Cleanup - Cancel the order
             Thread.Sleep(500);
-            var cancelRequest = new Messages.OKXCancelOrderRequest
+            var cancelRequest = new Messages.CancelOrderRequest
             {
                 InstrumentId = "BTC-USDT",
                 OrderId = result.Data.OrderId
@@ -514,7 +514,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         {
             // Arrange - Place order first
             var restClient = new RestApi.OKXRestApiClient(_apiKey, _apiSecret, _passphrase);
-            var placeRequest = new Messages.OKXPlaceOrderRequest
+            var placeRequest = new Messages.PlaceOrderRequest
             {
                 InstrumentId = "BTC-USDT",
                 TradeMode = "cash",
@@ -531,7 +531,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             Thread.Sleep(1000);
 
             // Act - Amend order
-            var amendRequest = new Messages.OKXAmendOrderRequest
+            var amendRequest = new Messages.AmendOrderRequest
             {
                 InstrumentId = "BTC-USDT",
                 OrderId = placeResult.Data.OrderId,
@@ -550,7 +550,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
             // Cleanup
             Thread.Sleep(500);
-            var cancelRequest = new Messages.OKXCancelOrderRequest
+            var cancelRequest = new Messages.CancelOrderRequest
             {
                 InstrumentId = "BTC-USDT",
                 OrderId = placeResult.Data.OrderId
@@ -566,7 +566,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         {
             // Arrange - Place order first
             var restClient = new RestApi.OKXRestApiClient(_apiKey, _apiSecret, _passphrase);
-            var placeRequest = new Messages.OKXPlaceOrderRequest
+            var placeRequest = new Messages.PlaceOrderRequest
             {
                 InstrumentId = "BTC-USDT",
                 TradeMode = "cash",
@@ -583,7 +583,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             Thread.Sleep(1000);
 
             // Act - Cancel order
-            var cancelRequest = new Messages.OKXCancelOrderRequest
+            var cancelRequest = new Messages.CancelOrderRequest
             {
                 InstrumentId = "BTC-USDT",
                 OrderId = placeResult.Data.OrderId

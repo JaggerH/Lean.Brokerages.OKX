@@ -17,6 +17,7 @@ using NUnit.Framework;
 using QuantConnect.Brokerages.OKX.RestApi;
 using QuantConnect.Configuration;
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 
@@ -247,7 +248,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 var firstPosition = positions[0];
 
                 Console.WriteLine($"Found {positions.Count} position(s)");
-                Console.WriteLine($"First position: {firstPosition.InstrumentId}, Qty={firstPosition.Position}, AvgPx={firstPosition.AveragePrice}");
+                Console.WriteLine($"First position: {firstPosition.InstrumentId}, Qty={firstPosition.Quantity}, AvgPx={firstPosition.AveragePrice}");
 
                 // Verify position has required fields
                 Assert.IsNotEmpty(firstPosition.InstrumentType, "InstrumentType should not be empty");
@@ -341,6 +342,155 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
             Assert.IsNotNull(instruments, "Should return empty list, not null");
             // OKX API may return empty list or error
+        }
+
+        #endregion
+
+        #region Execution History Tests
+
+        /// <summary>
+        /// Tests GetExecutionHistory endpoint returns fills list
+        /// </summary>
+        [Test]
+        public void GetExecutionHistory_ReturnsFilils()
+        {
+            // Get fills from the last 3 days (OKX API limit)
+            var endMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var beginMs = endMs - (3 * 24 * 60 * 60 * 1000); // 3 days ago
+
+            var fills = _client.GetExecutionHistory(null, null, beginMs, endMs);
+
+            Assert.IsNotNull(fills, "Fills should not be null");
+
+            if (fills.Count > 0)
+            {
+                var firstFill = fills[0];
+
+                Console.WriteLine($"Found {fills.Count} fill(s)");
+                Console.WriteLine($"First fill: TradeId={firstFill.TradeId}, OrderId={firstFill.OrderId}, InstId={firstFill.InstrumentId}");
+                Console.WriteLine($"  Side={firstFill.Side}, Size={firstFill.FillSize}, Price={firstFill.FillPrice}");
+                Console.WriteLine($"  Fee={firstFill.Fee} {firstFill.FeeCurrency}, Time={firstFill.FillTime}");
+
+                // Verify fill has required fields
+                Assert.IsNotEmpty(firstFill.TradeId, "TradeId should not be empty");
+                Assert.IsNotEmpty(firstFill.OrderId, "OrderId should not be empty");
+                Assert.IsNotEmpty(firstFill.InstrumentId, "InstrumentId should not be empty");
+                Assert.IsNotEmpty(firstFill.Side, "Side should not be empty");
+                Assert.IsNotEmpty(firstFill.FillSize, "FillSize should not be empty");
+                Assert.IsNotEmpty(firstFill.FillPrice, "FillPrice should not be empty");
+            }
+            else
+            {
+                Console.WriteLine("Account has no fills in the last 3 days");
+            }
+        }
+
+        /// <summary>
+        /// Tests GetExecutionHistory with instrument type filter
+        /// </summary>
+        [Test]
+        public void GetExecutionHistory_WithInstType_ReturnsFilteredFills()
+        {
+            var endMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var beginMs = endMs - (3 * 24 * 60 * 60 * 1000);
+
+            var fills = _client.GetExecutionHistory("SPOT", null, beginMs, endMs);
+
+            Assert.IsNotNull(fills, "Fills should not be null");
+
+            if (fills.Count > 0)
+            {
+                // Verify all fills are SPOT type
+                Assert.That(fills.All(f => f.InstrumentType == "SPOT"),
+                    "All fills should be SPOT type");
+
+                Console.WriteLine($"Found {fills.Count} SPOT fill(s)");
+            }
+            else
+            {
+                Console.WriteLine("Account has no SPOT fills in the last 3 days");
+            }
+        }
+
+        /// <summary>
+        /// Tests GetExecutionHistory with specific instrument
+        /// </summary>
+        [Test]
+        public void GetExecutionHistory_WithInstId_ReturnsFilteredFills()
+        {
+            var endMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var beginMs = endMs - (3 * 24 * 60 * 60 * 1000);
+
+            var fills = _client.GetExecutionHistory(null, "BTC-USDT", beginMs, endMs);
+
+            Assert.IsNotNull(fills, "Fills should not be null");
+
+            if (fills.Count > 0)
+            {
+                // Verify all fills are for BTC-USDT
+                Assert.That(fills.All(f => f.InstrumentId == "BTC-USDT"),
+                    "All fills should be for BTC-USDT");
+
+                Console.WriteLine($"Found {fills.Count} BTC-USDT fill(s)");
+            }
+            else
+            {
+                Console.WriteLine("Account has no BTC-USDT fills in the last 3 days");
+            }
+        }
+
+        /// <summary>
+        /// Tests GetExecutionHistory with limit parameter
+        /// </summary>
+        [Test]
+        public void GetExecutionHistory_WithLimit_RespectsLimit()
+        {
+            var endMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var beginMs = endMs - (3 * 24 * 60 * 60 * 1000);
+
+            var fills = _client.GetExecutionHistory(null, null, beginMs, endMs, limit: 5);
+
+            Assert.IsNotNull(fills, "Fills should not be null");
+            Assert.LessOrEqual(fills.Count, 5, "Should return at most 5 fills");
+
+            Console.WriteLine($"Requested limit=5, received {fills.Count} fill(s)");
+        }
+
+        /// <summary>
+        /// Tests GetExecutionHistory fields are parseable
+        /// </summary>
+        [Test]
+        public void GetExecutionHistory_FieldsAreParseable()
+        {
+            var endMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var beginMs = endMs - (3 * 24 * 60 * 60 * 1000);
+
+            var fills = _client.GetExecutionHistory(null, null, beginMs, endMs);
+
+            Assert.IsNotNull(fills, "Fills should not be null");
+
+            if (fills.Count > 0)
+            {
+                var fill = fills[0];
+
+                // Verify numeric fields are parseable
+                Assert.DoesNotThrow(() => decimal.Parse(fill.FillSize, CultureInfo.InvariantCulture),
+                    "FillSize should be parseable as decimal");
+                Assert.DoesNotThrow(() => decimal.Parse(fill.FillPrice, CultureInfo.InvariantCulture),
+                    "FillPrice should be parseable as decimal");
+                Assert.DoesNotThrow(() => decimal.Parse(fill.Fee ?? "0", CultureInfo.InvariantCulture),
+                    "Fee should be parseable as decimal");
+
+                // Verify timestamp is parseable
+                Assert.DoesNotThrow(() => long.Parse(fill.FillTime ?? fill.Timestamp),
+                    "FillTime/Timestamp should be parseable as long");
+
+                Console.WriteLine("All numeric fields are parseable");
+            }
+            else
+            {
+                Console.WriteLine("Account has no fills to verify parsing");
+            }
         }
 
         #endregion

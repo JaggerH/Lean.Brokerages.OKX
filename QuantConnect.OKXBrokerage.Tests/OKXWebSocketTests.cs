@@ -377,7 +377,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             client.PositionReceived += (sender, position) =>
             {
                 positionUpdates.Add(position);
-                Console.WriteLine($"Position update: {position.InstrumentId}, Pos={position.Position}, Side={position.PositionSide}");
+                Console.WriteLine($"Position update: {position.InstrumentId}, Pos={position.Quantity}, Side={position.PositionSide}");
             };
 
             // Act

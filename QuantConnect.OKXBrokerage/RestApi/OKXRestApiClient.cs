@@ -775,5 +775,64 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 };
             }
         }
+
+        /// <summary>
+        /// Gets user execution/fill history within a time range
+        /// https://www.okx.com/docs-v5/en/#rest-api-trade-get-transaction-details-last-3-days
+        /// GET /api/v5/trade/fills
+        /// Rate limit: 60 requests per 2 seconds
+        /// Requires authentication
+        /// </summary>
+        /// <param name="instType">Instrument type: SPOT, MARGIN, SWAP, FUTURES, OPTION (optional)</param>
+        /// <param name="instId">Instrument ID (optional)</param>
+        /// <param name="beginMs">Start timestamp in milliseconds (optional)</param>
+        /// <param name="endMs">End timestamp in milliseconds (optional)</param>
+        /// <param name="limit">Max results per request, default 100, max 100 (optional)</param>
+        /// <returns>List of fills, or empty list if request fails</returns>
+        public List<Fill> GetExecutionHistory(
+            string instType = null,
+            string instId = null,
+            long? beginMs = null,
+            long? endMs = null,
+            int limit = 100)
+        {
+            try
+            {
+                var queryParams = new List<string>();
+
+                if (!string.IsNullOrEmpty(instType))
+                    queryParams.Add($"instType={instType}");
+
+                if (!string.IsNullOrEmpty(instId))
+                    queryParams.Add($"instId={instId}");
+
+                if (beginMs.HasValue)
+                    queryParams.Add($"begin={beginMs.Value}");
+
+                if (endMs.HasValue)
+                    queryParams.Add($"end={endMs.Value}");
+
+                queryParams.Add($"limit={Math.Min(limit, 100)}");
+
+                var queryString = string.Join("&", queryParams);
+                var response = Get<OKXApiResponse<Fill>>(
+                    "/trade/fills",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess)
+                {
+                    Log.Error($"OKXRestApiClient.GetExecutionHistory(): Failed - code: {response?.Code}, msg: {response?.Message}");
+                    return new List<Fill>();
+                }
+
+                return response.Data ?? new List<Fill>();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetExecutionHistory(): Exception: {ex.Message}");
+                return new List<Fill>();
+            }
+        }
     }
 }

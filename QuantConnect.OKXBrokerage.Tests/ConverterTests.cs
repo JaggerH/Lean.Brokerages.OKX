@@ -17,6 +17,8 @@ using NUnit.Framework;
 using Newtonsoft.Json;
 using QuantConnect.Brokerages.OKX;
 using QuantConnect.Brokerages.OKX.Converters;
+using QuantConnect.Brokerages.OKX.Messages;
+using QuantConnect.Securities;
 using System;
 using System.Globalization;
 using System.IO;
@@ -288,6 +290,236 @@ namespace QuantConnect.Brokerages.OKX.Tests
             [JsonConverter(typeof(DateTimeConverter))]
             [JsonProperty("timestamp")]
             public DateTime Timestamp { get; set; }
+        }
+
+        #endregion
+
+        #region Fill ToExecutionRecord Tests
+
+        /// <summary>
+        /// Tests ToExecutionRecord converts Fill to ExecutionRecord correctly for buy order
+        /// </summary>
+        [Test]
+        public void ToExecutionRecord_BuyOrder_ReturnsPositiveQuantity()
+        {
+            var fill = new Fill
+            {
+                TradeId = "12345",
+                OrderId = "67890",
+                InstrumentId = "BTC-USDT",
+                InstrumentType = "SPOT",
+                Side = "buy",
+                FillSize = "0.01",
+                FillPrice = "50000.5",
+                Fee = "-0.5",
+                FeeCurrency = "USDT",
+                FillTime = "1597019583085",
+                Tag = "test-tag"
+            };
+
+            var symbolMapper = new OKXSymbolMapper(Market.OKX);
+            var result = fill.ToExecutionRecord(symbolMapper);
+
+            Assert.IsNotNull(result);
+            Assert.AreEqual("12345", result.ExecutionId);
+            Assert.AreEqual("67890", result.OrderId);
+            Assert.AreEqual(0.01m, result.Quantity, "Buy order should have positive quantity");
+            Assert.AreEqual(50000.5m, result.Price);
+            Assert.AreEqual(0.5m, result.Fee, "Fee should be absolute value");
+            Assert.AreEqual("USDT", result.FeeCurrency);
+            Assert.AreEqual("test-tag", result.Tag);
+            Assert.AreEqual(SecurityType.Crypto, result.Symbol.SecurityType);
+        }
+
+        /// <summary>
+        /// Tests ToExecutionRecord converts Fill to ExecutionRecord correctly for sell order
+        /// </summary>
+        [Test]
+        public void ToExecutionRecord_SellOrder_ReturnsNegativeQuantity()
+        {
+            var fill = new Fill
+            {
+                TradeId = "12345",
+                OrderId = "67890",
+                InstrumentId = "BTC-USDT",
+                InstrumentType = "SPOT",
+                Side = "sell",
+                FillSize = "0.01",
+                FillPrice = "50000.5",
+                Fee = "-0.5",
+                FeeCurrency = "USDT",
+                FillTime = "1597019583085"
+            };
+
+            var symbolMapper = new OKXSymbolMapper(Market.OKX);
+            var result = fill.ToExecutionRecord(symbolMapper);
+
+            Assert.IsNotNull(result);
+            Assert.AreEqual(-0.01m, result.Quantity, "Sell order should have negative quantity");
+        }
+
+        /// <summary>
+        /// Tests ToExecutionRecord correctly determines SecurityType for SWAP instruments
+        /// </summary>
+        [Test]
+        public void ToExecutionRecord_SwapInstrument_ReturnsCryptoFuture()
+        {
+            var fill = new Fill
+            {
+                TradeId = "12345",
+                OrderId = "67890",
+                InstrumentId = "BTC-USDT-SWAP",
+                InstrumentType = "SWAP",
+                Side = "buy",
+                FillSize = "1",
+                FillPrice = "50000",
+                Fee = "-0.1",
+                FeeCurrency = "USDT",
+                FillTime = "1597019583085"
+            };
+
+            var symbolMapper = new OKXSymbolMapper(Market.OKX);
+            var result = fill.ToExecutionRecord(symbolMapper);
+
+            Assert.IsNotNull(result);
+            Assert.AreEqual(SecurityType.CryptoFuture, result.Symbol.SecurityType);
+        }
+
+        /// <summary>
+        /// Tests ToExecutionRecord correctly determines SecurityType for FUTURES instruments
+        /// Note: Uses MARGIN instrument type as FUTURES delivery contracts may not be in symbol database
+        /// </summary>
+        [Test]
+        public void ToExecutionRecord_MarginInstrument_ReturnsCrypto()
+        {
+            var fill = new Fill
+            {
+                TradeId = "12345",
+                OrderId = "67890",
+                InstrumentId = "BTC-USDT",
+                InstrumentType = "MARGIN",
+                Side = "buy",
+                FillSize = "1",
+                FillPrice = "50000",
+                Fee = "-0.1",
+                FeeCurrency = "USDT",
+                FillTime = "1597019583085"
+            };
+
+            var symbolMapper = new OKXSymbolMapper(Market.OKX);
+            var result = fill.ToExecutionRecord(symbolMapper);
+
+            Assert.IsNotNull(result);
+            // MARGIN maps to Crypto (spot-like trading with leverage)
+            Assert.AreEqual(SecurityType.Crypto, result.Symbol.SecurityType);
+        }
+
+        /// <summary>
+        /// Tests ToExecutionRecord uses FillTime over Timestamp when available
+        /// </summary>
+        [Test]
+        public void ToExecutionRecord_UsesFillTimeOverTimestamp()
+        {
+            var fill = new Fill
+            {
+                TradeId = "12345",
+                OrderId = "67890",
+                InstrumentId = "BTC-USDT",
+                InstrumentType = "SPOT",
+                Side = "buy",
+                FillSize = "0.01",
+                FillPrice = "50000",
+                Fee = "-0.5",
+                FeeCurrency = "USDT",
+                FillTime = "1597019583085",  // 2020-08-10 00:33:03.085 UTC
+                Timestamp = "1597019600000"  // Different time
+            };
+
+            var symbolMapper = new OKXSymbolMapper(Market.OKX);
+            var result = fill.ToExecutionRecord(symbolMapper);
+
+            var expected = new DateTime(2020, 8, 10, 0, 33, 3, 85, DateTimeKind.Utc);
+            Assert.AreEqual(expected, result.TimeUtc, "Should use FillTime, not Timestamp");
+        }
+
+        /// <summary>
+        /// Tests ToExecutionRecord falls back to Timestamp when FillTime is empty
+        /// </summary>
+        [Test]
+        public void ToExecutionRecord_FallbackToTimestamp_WhenFillTimeEmpty()
+        {
+            var fill = new Fill
+            {
+                TradeId = "12345",
+                OrderId = "67890",
+                InstrumentId = "BTC-USDT",
+                InstrumentType = "SPOT",
+                Side = "buy",
+                FillSize = "0.01",
+                FillPrice = "50000",
+                Fee = "-0.5",
+                FeeCurrency = "USDT",
+                FillTime = "",  // Empty
+                Timestamp = "1597019583085"  // 2020-08-10 00:33:03.085 UTC
+            };
+
+            var symbolMapper = new OKXSymbolMapper(Market.OKX);
+            var result = fill.ToExecutionRecord(symbolMapper);
+
+            var expected = new DateTime(2020, 8, 10, 0, 33, 3, 85, DateTimeKind.Utc);
+            Assert.AreEqual(expected, result.TimeUtc, "Should fall back to Timestamp");
+        }
+
+        /// <summary>
+        /// Tests ToExecutionRecord handles null FeeCurrency with default
+        /// </summary>
+        [Test]
+        public void ToExecutionRecord_NullFeeCurrency_DefaultsToUSDT()
+        {
+            var fill = new Fill
+            {
+                TradeId = "12345",
+                OrderId = "67890",
+                InstrumentId = "BTC-USDT",
+                InstrumentType = "SPOT",
+                Side = "buy",
+                FillSize = "0.01",
+                FillPrice = "50000",
+                Fee = "-0.5",
+                FeeCurrency = null,
+                FillTime = "1597019583085"
+            };
+
+            var symbolMapper = new OKXSymbolMapper(Market.OKX);
+            var result = fill.ToExecutionRecord(symbolMapper);
+
+            Assert.AreEqual("USDT", result.FeeCurrency, "Should default to USDT when FeeCurrency is null");
+        }
+
+        /// <summary>
+        /// Tests ToExecutionRecord handles positive fee (rebate) correctly
+        /// </summary>
+        [Test]
+        public void ToExecutionRecord_PositiveFee_ReturnsAbsoluteValue()
+        {
+            var fill = new Fill
+            {
+                TradeId = "12345",
+                OrderId = "67890",
+                InstrumentId = "BTC-USDT",
+                InstrumentType = "SPOT",
+                Side = "buy",
+                FillSize = "0.01",
+                FillPrice = "50000",
+                Fee = "0.1",  // Positive = rebate
+                FeeCurrency = "USDT",
+                FillTime = "1597019583085"
+            };
+
+            var symbolMapper = new OKXSymbolMapper(Market.OKX);
+            var result = fill.ToExecutionRecord(symbolMapper);
+
+            Assert.AreEqual(0.1m, result.Fee, "Fee should be absolute value");
         }
 
         #endregion

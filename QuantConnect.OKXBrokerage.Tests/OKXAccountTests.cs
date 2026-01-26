@@ -261,7 +261,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
             {
                 Assert.IsNotNull(position.InstrumentId, "InstrumentId should not be null");
 
-                Console.WriteLine($"  Position {position.InstrumentId}: Qty={position.Position}, Avg={position.AveragePrice}, PnL={position.UnrealizedPnL}");
+                Console.WriteLine($"  Position {position.InstrumentId}: Qty={position.Quantity}, Avg={position.AveragePrice}, PnL={position.UnrealizedPnL}");
             }
         }
 
