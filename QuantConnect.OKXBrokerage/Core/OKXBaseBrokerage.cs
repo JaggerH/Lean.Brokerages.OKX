@@ -106,6 +106,13 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         private Timer _reconnectTimer;
 
+        /// <summary>
+        /// Message handler for synchronizing REST API calls with WebSocket message processing.
+        /// Prevents race conditions where WebSocket receives order updates before REST response sets BrokerId.
+        /// Following Binance pattern.
+        /// </summary>
+        private BrokerageConcurrentMessageHandler<WebSocketMessage> _messageHandler;
+
         // ========================================
         // PROTECTED FIELDS
         // ========================================
@@ -234,7 +241,11 @@ namespace QuantConnect.Brokerages.OKX
             // 4. Initialize REST API client
             RestApiClient = new OKXRestApiClient(apiKey, apiSecret, passphrase);
 
-            // 5. Initialize timers (created once, controlled via Start/Stop - Binance pattern)
+            // 5. Initialize message handler for REST/WebSocket synchronization (Binance pattern)
+            // This prevents race conditions where WebSocket receives fills before REST response sets BrokerId
+            _messageHandler = new BrokerageConcurrentMessageHandler<WebSocketMessage>(ProcessPrivateMessage);
+
+            // 6. Initialize timers (created once, controlled via Start/Stop - Binance pattern)
             // Send heartbeat every 15 seconds
             _keepAliveTimer = new Timer
             {
@@ -625,6 +636,7 @@ namespace QuantConnect.Brokerages.OKX
         {
             _keepAliveTimer?.DisposeSafely();
             _reconnectTimer?.DisposeSafely();
+            _messageHandler?.DisposeSafely();
             OrderRateLimiter?.DisposeSafely();
 
             base.Dispose();

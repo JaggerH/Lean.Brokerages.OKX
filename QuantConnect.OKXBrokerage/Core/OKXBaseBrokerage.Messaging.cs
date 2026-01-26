@@ -40,9 +40,21 @@ namespace QuantConnect.Brokerages.OKX
         // ========================================
 
         /// <summary>
-        /// Handles incoming WebSocket messages (called by base class)
+        /// Handles incoming WebSocket messages (called by base class).
+        /// Routes messages through BrokerageConcurrentMessageHandler to synchronize with REST API calls.
+        /// This prevents race conditions where WebSocket receives order updates before REST response sets BrokerId.
+        /// Following Binance pattern.
         /// </summary>
         protected override void OnMessage(object sender, WebSocketMessage e)
+        {
+            _messageHandler.HandleNewMessage(e);
+        }
+
+        /// <summary>
+        /// Processes private WebSocket messages after passing through the message handler.
+        /// Called by BrokerageConcurrentMessageHandler - may be immediate or deferred if REST operation is in progress.
+        /// </summary>
+        private void ProcessPrivateMessage(WebSocketMessage e)
         {
             try
             {
@@ -71,7 +83,7 @@ namespace QuantConnect.Brokerages.OKX
             }
             catch (Exception ex)
             {
-                Log.Error($"{GetType().Name}.OnMessage(): Error: {ex}");
+                Log.Error($"{GetType().Name}.ProcessPrivateMessage(): Error: {ex}");
             }
         }
 

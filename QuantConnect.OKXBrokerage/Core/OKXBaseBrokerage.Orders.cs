@@ -36,47 +36,58 @@ namespace QuantConnect.Brokerages.OKX
         // ========================================
 
         /// <summary>
-        /// Places a new order and assigns a new broker ID to the order
-        /// Follows Binance pattern: always returns true, errors reported via events
+        /// Places a new order and assigns a new broker ID to the order.
+        /// Uses WithLockedStream to synchronize REST API call with WebSocket message processing.
+        /// This prevents race conditions where WebSocket receives fills before REST response sets BrokerId.
+        /// Follows Binance pattern: always returns true, errors reported via events.
         /// </summary>
         /// <param name="order">The order to be placed</param>
         /// <returns>True (errors are reported via OrderEvent and BrokerageMessageEvent)</returns>
         public override bool PlaceOrder(Order order)
         {
-            try
+            var submitted = false;
+
+            _messageHandler.WithLockedStream(() =>
             {
-                // Rate limit order operations
-                OrderRateLimiter.WaitToProceed();
-
-                // Convert LEAN symbol to OKX instrument ID
-                var instId = _symbolMapper.GetBrokerageSymbol(order.Symbol);
-
-                // Determine trade mode based on account mode and security type
-                var tdMode = GetTradeMode(order.Symbol.SecurityType);
-
-                // Route to appropriate handler based on order type
-                if (IsSpotMarketBuy(order))
+                try
                 {
-                    return PlaceSpotMarketBuyAsFokLimit(order, instId, tdMode);
+                    // Rate limit order operations
+                    OrderRateLimiter.WaitToProceed();
+
+                    // Convert LEAN symbol to OKX instrument ID
+                    var instId = _symbolMapper.GetBrokerageSymbol(order.Symbol);
+
+                    // Determine trade mode based on account mode and security type
+                    var tdMode = GetTradeMode(order.Symbol.SecurityType);
+
+                    // Route to appropriate handler based on order type
+                    if (IsSpotMarketBuy(order))
+                    {
+                        submitted = PlaceSpotMarketBuyAsFokLimit(order, instId, tdMode);
+                    }
+                    else
+                    {
+                        submitted = PlaceStandardOrder(order, instId, tdMode);
+                    }
                 }
-
-                return PlaceStandardOrder(order, instId, tdMode);
-            }
-            catch (Exception ex)
-            {
-                var message = $"Exception placing order {order.Id}: {ex.Message}";
-                Log.Error($"OKXBaseBrokerage.PlaceOrder(): {message}");
-
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "ORDER_PLACEMENT_ERROR", message));
-
-                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                catch (Exception ex)
                 {
-                    Status = OrderStatus.Invalid,
-                    Message = ex.Message
-                });
+                    var message = $"Exception placing order {order.Id}: {ex.Message}";
+                    Log.Error($"OKXBaseBrokerage.PlaceOrder(): {message}");
 
-                return true;  // Binance pattern: return true even on exception
-            }
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "ORDER_PLACEMENT_ERROR", message));
+
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                    {
+                        Status = OrderStatus.Invalid,
+                        Message = ex.Message
+                    });
+
+                    submitted = true;  // Binance pattern: return true even on exception
+                }
+            });
+
+            return submitted;
         }
 
         /// <summary>
@@ -275,110 +286,128 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Updates the order with the same id
-        /// Follows Binance pattern: always returns true, errors reported via events
+        /// Updates the order with the same id.
+        /// Uses WithLockedStream to synchronize REST API call with WebSocket message processing.
+        /// Follows Binance pattern: always returns true, errors reported via events.
         /// </summary>
         /// <param name="order">The new order information</param>
         /// <returns>True (errors are reported via OrderEvent and BrokerageMessageEvent)</returns>
         public override bool UpdateOrder(Order order)
         {
-            try
+            var submitted = false;
+
+            _messageHandler.WithLockedStream(() =>
             {
-                // Rate limit order operations
-                OrderRateLimiter.WaitToProceed();
-
-                if (order.BrokerId.Count == 0)
+                try
                 {
-                    throw new InvalidOperationException("Cannot update order: No broker ID found");
+                    // Rate limit order operations
+                    OrderRateLimiter.WaitToProceed();
+
+                    if (order.BrokerId.Count == 0)
+                    {
+                        throw new InvalidOperationException("Cannot update order: No broker ID found");
+                    }
+
+                    var ordId = order.BrokerId[0];
+                    var instId = _symbolMapper.GetBrokerageSymbol(order.Symbol);
+
+                    // Determine what to update based on order type
+                    string newPrice = null;
+                    string newSize = Math.Abs(order.Quantity).ToStringInvariant();
+
+                    if (order.Type == OrderType.Limit)
+                    {
+                        newPrice = ((LimitOrder)order).LimitPrice.ToStringInvariant();
+                    }
+
+                    // Create amend request
+                    var request = new Messages.OKXAmendOrderRequest
+                    {
+                        InstrumentId = instId,
+                        OrderId = ordId,
+                        NewSize = newSize,
+                        NewPrice = newPrice
+                    };
+
+                    // Amend order via REST API
+                    var result = RestApiClient.AmendOrder(request);
+
+                    if (result.IsSuccess)
+                    {
+                        Log.Trace($"OKXBaseBrokerage.UpdateOrder(): Order {order.Id} (OKX: {ordId}) updated successfully");
+                        submitted = true;
+                        return;
+                    }
+
+                    throw new InvalidOperationException($"Update failed: {result.GetErrorMessage()}");
                 }
-
-                var ordId = order.BrokerId[0];
-                var instId = _symbolMapper.GetBrokerageSymbol(order.Symbol);
-
-                // Determine what to update based on order type
-                string newPrice = null;
-                string newSize = Math.Abs(order.Quantity).ToStringInvariant();
-
-                if (order.Type == OrderType.Limit)
+                catch (Exception ex)
                 {
-                    newPrice = ((LimitOrder)order).LimitPrice.ToStringInvariant();
+                    var message = $"Exception updating order {order.Id}: {ex.Message}";
+                    Log.Trace($"OKXBaseBrokerage.UpdateOrder(): {message}");
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "ORDER_UPDATE_ERROR", message));
+                    submitted = true;
                 }
+            });
 
-                // Create amend request
-                var request = new Messages.OKXAmendOrderRequest
-                {
-                    InstrumentId = instId,
-                    OrderId = ordId,
-                    NewSize = newSize,
-                    NewPrice = newPrice
-                };
-
-                // Amend order via REST API
-                var result = RestApiClient.AmendOrder(request);
-
-                if (result.IsSuccess)
-                {
-                    Log.Trace($"OKXBaseBrokerage.UpdateOrder(): Order {order.Id} (OKX: {ordId}) updated successfully");
-                    return true;
-                }
-
-                throw new InvalidOperationException($"Update failed: {result.GetErrorMessage()}");
-            }
-            catch (Exception ex)
-            {
-                var message = $"Exception updating order {order.Id}: {ex.Message}";
-                Log.Trace($"OKXBaseBrokerage.UpdateOrder(): {message}");
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "ORDER_UPDATE_ERROR", message));
-                return true;
-            }
+            return submitted;
         }
 
         /// <summary>
-        /// Cancels the order with the specified ID
-        /// Follows Binance pattern: always returns true, errors reported via events
+        /// Cancels the order with the specified ID.
+        /// Uses WithLockedStream to synchronize REST API call with WebSocket message processing.
+        /// Follows Binance pattern: always returns true, errors reported via events.
         /// </summary>
         /// <param name="order">The order to cancel</param>
         /// <returns>True (errors are reported via OrderEvent and BrokerageMessageEvent)</returns>
         public override bool CancelOrder(Order order)
         {
-            try
+            var submitted = false;
+
+            _messageHandler.WithLockedStream(() =>
             {
-                // Rate limit order operations
-                OrderRateLimiter.WaitToProceed();
-
-                if (order.BrokerId.Count == 0)
+                try
                 {
-                    throw new InvalidOperationException("Cannot cancel order: No broker ID found");
+                    // Rate limit order operations
+                    OrderRateLimiter.WaitToProceed();
+
+                    if (order.BrokerId.Count == 0)
+                    {
+                        throw new InvalidOperationException("Cannot cancel order: No broker ID found");
+                    }
+
+                    var ordId = order.BrokerId[0];
+                    var instId = _symbolMapper.GetBrokerageSymbol(order.Symbol);
+
+                    // Create cancel request
+                    var request = new Messages.OKXCancelOrderRequest
+                    {
+                        InstrumentId = instId,
+                        OrderId = ordId
+                    };
+
+                    // Cancel order via REST API
+                    var result = RestApiClient.CancelOrder(request);
+
+                    if (result.IsSuccess)
+                    {
+                        Log.Trace($"OKXBaseBrokerage.CancelOrder(): Order {order.Id} (OKX: {ordId}) canceled successfully");
+                        submitted = true;
+                        return;
+                    }
+
+                    throw new InvalidOperationException($"Cancel failed: {result.GetErrorMessage()}");
                 }
-
-                var ordId = order.BrokerId[0];
-                var instId = _symbolMapper.GetBrokerageSymbol(order.Symbol);
-
-                // Create cancel request
-                var request = new Messages.OKXCancelOrderRequest
+                catch (Exception ex)
                 {
-                    InstrumentId = instId,
-                    OrderId = ordId
-                };
-
-                // Cancel order via REST API
-                var result = RestApiClient.CancelOrder(request);
-
-                if (result.IsSuccess)
-                {
-                    Log.Trace($"OKXBaseBrokerage.CancelOrder(): Order {order.Id} (OKX: {ordId}) canceled successfully");
-                    return true;
+                    var message = $"Exception canceling order {order.Id}: {ex.Message}";
+                    Log.Trace($"OKXBaseBrokerage.CancelOrder(): {message}");
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "ORDER_CANCEL_ERROR", message));
+                    submitted = true;
                 }
+            });
 
-                throw new InvalidOperationException($"Cancel failed: {result.GetErrorMessage()}");
-            }
-            catch (Exception ex)
-            {
-                var message = $"Exception canceling order {order.Id}: {ex.Message}";
-                Log.Trace($"OKXBaseBrokerage.CancelOrder(): {message}");
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "ORDER_CANCEL_ERROR", message));
-                return true;
-            }
+            return submitted;
         }
     }
 }
