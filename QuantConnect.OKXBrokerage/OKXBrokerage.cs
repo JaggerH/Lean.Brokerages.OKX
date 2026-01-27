@@ -15,15 +15,12 @@
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Newtonsoft.Json;
-using QuantConnect.Brokerages.OKX.Converters;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Securities;
-using QuantConnect.TradingPairs;
 using QuantConnect.Util;
 
 namespace QuantConnect.Brokerages.OKX
@@ -282,35 +279,6 @@ namespace QuantConnect.Brokerages.OKX
             catch (Exception ex) when (!ex.Message.Contains("mismatch") && !ex.Message.Contains("Failed to retrieve"))
             {
                 Log.Error($"OKXBrokerage.ValidateAccountMode(): Warning - {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Gets execution history for reconciliation (called by LEAN via reflection)
-        /// </summary>
-        /// <param name="startTimeUtc">Start time UTC</param>
-        /// <param name="endTimeUtc">End time UTC</param>
-        /// <returns>List of execution records</returns>
-        public List<ExecutionRecord> GetExecutionHistory(DateTime startTimeUtc, DateTime endTimeUtc)
-        {
-            try
-            {
-                // Add 5-minute buffer to account for potential timing differences
-                var beginMs = new DateTimeOffset(startTimeUtc).ToUnixTimeMilliseconds() - 300000;
-                var endMs = new DateTimeOffset(endTimeUtc).ToUnixTimeMilliseconds() + 300000;
-
-                // Get fills for all instrument types
-                var fills = RestApiClient.GetExecutionHistory(null, null, beginMs, endMs);
-
-                // Convert to ExecutionRecord
-                return fills
-                    .Select(fill => fill.ToExecutionRecord(_symbolMapper))
-                    .ToList();
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"OKXBrokerage.GetExecutionHistory(): Error: {ex.Message}");
-                return new List<ExecutionRecord>();
             }
         }
     }

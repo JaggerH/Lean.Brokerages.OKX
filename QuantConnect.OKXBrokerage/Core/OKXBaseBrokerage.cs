@@ -16,9 +16,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json;
+using QuantConnect.Brokerages.OKX.Converters;
 using QuantConnect.Brokerages.OKX.RestApi;
 using QuantConnect.Configuration;
 using QuantConnect.Data;
@@ -27,6 +27,7 @@ using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Packets;
 using QuantConnect.Securities;
+using QuantConnect.TradingPairs;
 using QuantConnect.Util;
 using Timer = System.Timers.Timer;
 
@@ -37,7 +38,7 @@ namespace QuantConnect.Brokerages.OKX
     /// Provides common WebSocket management, order state tracking, and data handling
     /// Eliminates IsFuturesModel checks in favor of proper OOP via virtual methods
     /// </summary>
-    public abstract partial class OKXBaseBrokerage : BaseWebsocketsBrokerage, IDataQueueHandler, IDataQueueUniverseProvider
+    public abstract partial class OKXBaseBrokerage : BaseWebsocketsBrokerage, IDataQueueHandler, IDataQueueUniverseProvider, IExecutionHistoryProvider
     {
         // ========================================
         // CONSTANTS
@@ -438,6 +439,35 @@ namespace QuantConnect.Brokerages.OKX
         public override List<Order> GetOpenOrders()
         {
             return RestApiClient.GetOpenOrders();
+        }
+
+        /// <summary>
+        /// Gets execution history for reconciliation
+        /// </summary>
+        /// <param name="startTimeUtc">Start time UTC</param>
+        /// <param name="endTimeUtc">End time UTC</param>
+        /// <returns>List of execution records</returns>
+        public List<ExecutionRecord> GetExecutionHistory(DateTime startTimeUtc, DateTime endTimeUtc)
+        {
+            try
+            {
+                // Add 5-minute buffer to account for potential timing differences
+                var beginMs = new DateTimeOffset(startTimeUtc).ToUnixTimeMilliseconds() - 300000;
+                var endMs = new DateTimeOffset(endTimeUtc).ToUnixTimeMilliseconds() + 300000;
+
+                // Get fills for all instrument types
+                var fills = RestApiClient.GetExecutionHistory(null, null, beginMs, endMs);
+
+                // Convert to ExecutionRecord
+                return fills
+                    .Select(fill => fill.ToExecutionRecord(_symbolMapper))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXBaseBrokerage.GetExecutionHistory(): Error: {ex.Message}");
+                return new List<ExecutionRecord>();
+            }
         }
 
 
