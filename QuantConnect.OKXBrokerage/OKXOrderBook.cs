@@ -21,355 +21,79 @@ using QuantConnect.Data.Market;
 namespace QuantConnect.Brokerages.OKX
 {
     /// <summary>
-    /// Represents a full order book for OKX securities.
-    /// Implements IOrderBookUpdater with batch update support.
-    ///
-    /// Key Design:
-    /// - Single lock (_locker) protects all operations
-    /// - Single-row methods (UpdateBidRow, etc.) trigger events immediately when best price changes
-    /// - Batch methods (ApplyFullSnapshot, ApplyIncrementalUpdate) trigger event only once if best prices changed
-    /// - Readers are blocked during batch updates to prevent inconsistent reads (e.g., Bid > Ask)
+    /// OKX-specific order book that extends DefaultOrderBook with OKX WebSocket format parsing.
+    /// Provides methods to apply snapshots and deltas from OKX's string-based price level format.
     /// </summary>
-    public class OKXOrderBook : IOrderBookUpdater<decimal, decimal>
+    public class OKXOrderBook : DefaultOrderBook
     {
-        private readonly object _locker = new object();
-        private readonly SortedDictionary<decimal, decimal> Bids = new SortedDictionary<decimal, decimal>();
-        private readonly SortedDictionary<decimal, decimal> Asks = new SortedDictionary<decimal, decimal>();
+        private readonly object _readLocker = new object();
 
         /// <summary>
-        /// The symbol for the order book. Set by caller when raising events.
+        /// Last processed sequence ID for validation
         /// </summary>
-        public Symbol Symbol { get; set; }
-
-        private decimal _bestBidPrice;
-        private decimal _bestBidSize;
-        private decimal _bestAskPrice;
-        private decimal _bestAskSize;
+        public long LastUpdateId { get; set; }
 
         /// <summary>
-        /// Event fired each time BestBidPrice or BestAskPrice are changed
+        /// Timestamp of last update
         /// </summary>
-        public event EventHandler<BestBidAskUpdatedEventArgs> BestBidAskUpdated;
+        public DateTime LastUpdateTime { get; set; }
 
-        public OKXOrderBook(Symbol symbol)
+        /// <summary>
+        /// Initializes a new instance of the <see cref="OKXOrderBook"/> class
+        /// </summary>
+        /// <param name="symbol">The symbol for the order book</param>
+        public OKXOrderBook(Symbol symbol) : base(symbol)
         {
-            Symbol = symbol;
         }
 
         /// <summary>
-        /// The best bid price
-        /// </summary>
-        public decimal BestBidPrice { get { lock (_locker) { return _bestBidPrice; } } }
-
-        /// <summary>
-        /// The best bid size
-        /// </summary>
-        public decimal BestBidSize { get { lock (_locker) { return _bestBidSize; } } }
-
-        /// <summary>
-        /// The best ask price
-        /// </summary>
-        public decimal BestAskPrice { get { lock (_locker) { return _bestAskPrice; } } }
-
-        /// <summary>
-        /// The best ask size
-        /// </summary>
-        public decimal BestAskSize { get { lock (_locker) { return _bestAskSize; } } }
-
-        /// <summary>
-        /// Gets the number of bid levels currently in the order book
-        /// </summary>
-        public int BidCount { get { lock (_locker) { return Bids.Count; } } }
-
-        /// <summary>
-        /// Gets the number of ask levels currently in the order book
-        /// </summary>
-        public int AskCount { get { lock (_locker) { return Asks.Count; } } }
-
-        #region IOrderBookUpdater Implementation (Single-row operations with immediate events)
-
-        /// <summary>
-        /// Updates or inserts a bid price level in the order book.
-        /// Triggers BestBidAskUpdated if this becomes the new best bid.
-        /// </summary>
-        public void UpdateBidRow(decimal price, decimal size)
-        {
-            lock (_locker)
-            {
-                Bids[price] = size;
-
-                if (_bestBidPrice == 0 || price >= _bestBidPrice)
-                {
-                    _bestBidPrice = price;
-                    _bestBidSize = size;
-                    RaiseBestBidAskUpdated();
-                }
-            }
-        }
-
-        /// <summary>
-        /// Updates or inserts an ask price level in the order book.
-        /// Triggers BestBidAskUpdated if this becomes the new best ask.
-        /// </summary>
-        public void UpdateAskRow(decimal price, decimal size)
-        {
-            lock (_locker)
-            {
-                Asks[price] = size;
-
-                if (_bestAskPrice == 0 || price <= _bestAskPrice)
-                {
-                    _bestAskPrice = price;
-                    _bestAskSize = size;
-                    RaiseBestBidAskUpdated();
-                }
-            }
-        }
-
-        /// <summary>
-        /// Removes a bid price level from the order book.
-        /// Triggers BestBidAskUpdated if the best bid was removed.
-        /// </summary>
-        public void RemoveBidRow(decimal price)
-        {
-            lock (_locker)
-            {
-                Bids.Remove(price);
-
-                if (price == _bestBidPrice)
-                {
-                    var priceLevel = Bids.LastOrDefault();
-                    _bestBidPrice = priceLevel.Key;
-                    _bestBidSize = priceLevel.Value;
-                    RaiseBestBidAskUpdated();
-                }
-            }
-        }
-
-        /// <summary>
-        /// Removes an ask price level from the order book.
-        /// Triggers BestBidAskUpdated if the best ask was removed.
-        /// </summary>
-        public void RemoveAskRow(decimal price)
-        {
-            lock (_locker)
-            {
-                Asks.Remove(price);
-
-                if (price == _bestAskPrice)
-                {
-                    var priceLevel = Asks.FirstOrDefault();
-                    _bestAskPrice = priceLevel.Key;
-                    _bestAskSize = priceLevel.Value;
-                    RaiseBestBidAskUpdated();
-                }
-            }
-        }
-
-        #endregion
-
-        #region Silent Operations (No events - for batch updates)
-
-        private void UpdateBidRowSilent(decimal price, decimal size)
-        {
-            Bids[price] = size;
-        }
-
-        private void UpdateAskRowSilent(decimal price, decimal size)
-        {
-            Asks[price] = size;
-        }
-
-        private void RemoveBidRowSilent(decimal price)
-        {
-            Bids.Remove(price);
-        }
-
-        private void RemoveAskRowSilent(decimal price)
-        {
-            Asks.Remove(price);
-        }
-
-        private void ClearSilent()
-        {
-            Bids.Clear();
-            Asks.Clear();
-            _bestBidPrice = 0;
-            _bestBidSize = 0;
-            _bestAskPrice = 0;
-            _bestAskSize = 0;
-        }
-
-        /// <summary>
-        /// Recalculates best bid/ask prices from the dictionaries.
-        /// Returns true if best prices changed, false otherwise.
-        /// </summary>
-        private bool RecalculateBestPrices()
-        {
-            var updated = false;
-
-            if (Bids.Count > 0)
-            {
-                var bestBid = Bids.Last(); // Highest price
-                if (_bestBidPrice != bestBid.Key || _bestBidSize != bestBid.Value)
-                {
-                    _bestBidPrice = bestBid.Key;
-                    _bestBidSize = bestBid.Value;
-                    updated = true;
-                }
-            }
-            else if (_bestBidPrice != 0 || _bestBidSize != 0)
-            {
-                _bestBidPrice = 0;
-                _bestBidSize = 0;
-                updated = true;
-            }
-
-            if (Asks.Count > 0)
-            {
-                var bestAsk = Asks.First(); // Lowest price
-                if (_bestAskPrice != bestAsk.Key || _bestAskSize != bestAsk.Value)
-                {
-                    _bestAskPrice = bestAsk.Key;
-                    _bestAskSize = bestAsk.Value;
-                    updated = true;
-                }
-            }
-            else if (_bestAskPrice != 0 || _bestAskSize != 0)
-            {
-                _bestAskPrice = 0;
-                _bestAskSize = 0;
-                updated = true;
-            }
-
-            return updated;
-        }
-
-        #endregion
-
-        #region Batch Operations (Single event after all updates, only if best prices changed)
-
-        /// <summary>
-        /// Clears all bid/ask levels and prices.
-        /// </summary>
-        public void Clear()
-        {
-            lock (_locker)
-            {
-                ClearSilent();
-            }
-        }
-
-        /// <summary>
-        /// Applies a full order book snapshot (from WebSocket).
+        /// Applies a full order book snapshot from OKX WebSocket format.
         /// Clears existing data and applies new snapshot atomically.
-        /// Triggers BestBidAskUpdated only if best prices changed.
         /// </summary>
-        /// <param name="bids">List of bid price levels in OKX format [[price, size], ...]</param>
-        /// <param name="asks">List of ask price levels in OKX format [[price, size], ...]</param>
+        /// <param name="bids">List of bid price levels in OKX format [[price, size, ...], ...]</param>
+        /// <param name="asks">List of ask price levels in OKX format [[price, size, ...], ...]</param>
         public void ApplyFullSnapshot(List<List<string>> bids, List<List<string>> asks)
         {
-            lock (_locker)
+            lock (_readLocker)
             {
-                ClearSilent();
-
-                // Apply all bids
-                foreach (var bid in bids ?? new List<List<string>>())
-                {
-                    if (bid.Count >= 2 &&
-                        decimal.TryParse(bid[0], out var price) &&
-                        decimal.TryParse(bid[1], out var size) &&
-                        size > 0)
-                    {
-                        UpdateBidRowSilent(price, size);
-                    }
-                }
-
-                // Apply all asks
-                foreach (var ask in asks ?? new List<List<string>>())
-                {
-                    if (ask.Count >= 2 &&
-                        decimal.TryParse(ask[0], out var price) &&
-                        decimal.TryParse(ask[1], out var size) &&
-                        size > 0)
-                    {
-                        UpdateAskRowSilent(price, size);
-                    }
-                }
-
-                if (RecalculateBestPrices())
-                {
-                    RaiseBestBidAskUpdated();
-                }
+                ApplySnapshot(ParseLevels(bids), ParseLevels(asks));
             }
         }
 
         /// <summary>
-        /// Applies incremental order book updates (from WebSocket).
+        /// Applies incremental order book updates from OKX WebSocket format.
         /// Size=0 means remove the price level.
-        /// Triggers BestBidAskUpdated only if best prices changed.
         /// </summary>
-        /// <param name="bids">List of bid updates in OKX format [[price, size], ...]</param>
-        /// <param name="asks">List of ask updates in OKX format [[price, size], ...]</param>
+        /// <param name="bids">List of bid updates in OKX format [[price, size, ...], ...]</param>
+        /// <param name="asks">List of ask updates in OKX format [[price, size, ...], ...]</param>
         public void ApplyIncrementalUpdate(List<List<string>> bids, List<List<string>> asks)
         {
-            lock (_locker)
+            lock (_readLocker)
             {
-                // Apply bid incremental updates
-                foreach (var bid in bids ?? new List<List<string>>())
-                {
-                    if (bid.Count >= 2 &&
-                        decimal.TryParse(bid[0], out var price) &&
-                        decimal.TryParse(bid[1], out var size))
-                    {
-                        if (size == 0)
-                            RemoveBidRowSilent(price);
-                        else
-                            UpdateBidRowSilent(price, size);
-                    }
-                }
-
-                // Apply ask incremental updates
-                foreach (var ask in asks ?? new List<List<string>>())
-                {
-                    if (ask.Count >= 2 &&
-                        decimal.TryParse(ask[0], out var price) &&
-                        decimal.TryParse(ask[1], out var size))
-                    {
-                        if (size == 0)
-                            RemoveAskRowSilent(price);
-                        else
-                            UpdateAskRowSilent(price, size);
-                    }
-                }
-
-                if (RecalculateBestPrices())
-                {
-                    RaiseBestBidAskUpdated();
-                }
+                ApplyDelta(ParseLevels(bids), ParseLevels(asks));
             }
         }
-
-        #endregion
-
-        #region Event Helpers
 
         /// <summary>
-        /// Raises the BestBidAskUpdated event with current best prices.
-        /// Only fires if both best bid and best ask are valid (> 0).
+        /// Parses OKX string-based price levels to decimal tuples
         /// </summary>
-        private void RaiseBestBidAskUpdated()
+        private static IEnumerable<(decimal Price, decimal Size)> ParseLevels(List<List<string>> levels)
         {
-            if (_bestBidPrice > 0 && _bestAskPrice > 0)
+            if (levels == null)
             {
-                BestBidAskUpdated?.Invoke(this, new BestBidAskUpdatedEventArgs(
-                    Symbol, _bestBidPrice, _bestBidSize, _bestAskPrice, _bestAskSize));
+                yield break;
+            }
+
+            foreach (var level in levels)
+            {
+                if (level.Count >= 2 &&
+                    decimal.TryParse(level[0], out var price) &&
+                    decimal.TryParse(level[1], out var size))
+                {
+                    yield return (price, size);
+                }
             }
         }
-
-        #endregion
-
-        #region Read Operations
 
         /// <summary>
         /// Gets all bid levels sorted by price descending (best bid first).
@@ -377,7 +101,7 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         public IEnumerable<KeyValuePair<decimal, decimal>> GetBids()
         {
-            lock (_locker)
+            lock (_readLocker)
             {
                 return Bids.Reverse().ToList();
             }
@@ -389,7 +113,7 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         public IEnumerable<KeyValuePair<decimal, decimal>> GetAsks()
         {
-            lock (_locker)
+            lock (_readLocker)
             {
                 return Asks.ToList();
             }
@@ -401,7 +125,7 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         public Orderbook ToOrderbook()
         {
-            lock (_locker)
+            lock (_readLocker)
             {
                 var now = DateTime.UtcNow;
 
@@ -424,7 +148,5 @@ namespace QuantConnect.Brokerages.OKX
                 };
             }
         }
-
-        #endregion
     }
 }
