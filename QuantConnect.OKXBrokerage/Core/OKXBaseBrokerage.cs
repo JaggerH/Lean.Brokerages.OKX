@@ -269,7 +269,10 @@ namespace QuantConnect.Brokerages.OKX
                 Connect();
             };
 
-            // 6. Attach anonymous WebSocket event handlers (Binance pattern)
+            // 6. Initialize order book synchronizer
+            InitializeOrderBookSync();
+
+            // 7. Attach anonymous WebSocket event handlers (Binance pattern)
             WebSocket.Open += (sender, e) =>
             {
                 Log.Trace($"{GetType().Name}.WebSocket.Open: Connection established");
@@ -489,13 +492,9 @@ namespace QuantConnect.Brokerages.OKX
             {
                 var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
-                // Initialize order book context for this symbol (if not already exists)
-                var orderBookContext = _orderBookContexts.GetOrAdd(symbol, _ =>
-                {
-                    var newContext = new OrderBookContext(this, symbol, brokerageSymbol);
-                    _orderBooks[symbol] = newContext.OrderBook;
-                    return newContext;
-                });
+                // Pre-create synchronizer to start initialization
+                // This creates the OrderBook state before any WebSocket messages arrive
+                _orderBookSync?.GetSynchronizer(symbol);
 
                 // OKX v5 API subscription format: { "op": "subscribe", "args": [ { "channel": "...", "instId": "..." } ] }
                 // Subscribe to books channel (400-level orderbook depth)
@@ -568,30 +567,8 @@ namespace QuantConnect.Brokerages.OKX
                 };
                 webSocket.Send(JsonConvert.SerializeObject(bookUnsubscribeMessage));
 
-                // Clean up order book contexts
-                if (_orderBookContexts.TryRemove(symbol, out var context))
-                {
-                    try
-                    {
-                        // Signal cancellation
-                        context.CancellationToken?.Cancel();
-
-                        // Complete the Channel writer (no more messages)
-                        context.MessageChannel?.Writer.Complete();
-
-                        // Wait for consumer task to finish (with timeout)
-                        context.ConsumerTask?.Wait(TimeSpan.FromSeconds(5));
-
-                        // Dispose resources
-                        context.CancellationToken?.Dispose();
-
-                        Log.Trace($"{GetType().Name}.Unsubscribe(): Cleaned up OrderBookContext for {symbol}");
-                    }
-                    catch (Exception cleanupEx)
-                    {
-                        Log.Error($"{GetType().Name}.Unsubscribe({symbol}): Cleanup error: {cleanupEx.Message}");
-                    }
-                }
+                // Clean up order book synchronizer state
+                _orderBookSync?.RemoveState(symbol);
                 _orderBooks.TryRemove(symbol, out _);
 
                 // Unsubscribe from trades channel
@@ -668,6 +645,7 @@ namespace QuantConnect.Brokerages.OKX
             _reconnectTimer?.DisposeSafely();
             _messageHandler?.DisposeSafely();
             OrderRateLimiter?.DisposeSafely();
+            _orderBookSync?.Dispose();
 
             base.Dispose();
         }

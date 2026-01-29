@@ -295,6 +295,12 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// </summary>
         [JsonProperty("seqId", NullValueHandling = NullValueHandling.Ignore)]
         public long? SequenceId { get; set; }
+
+        /// <summary>
+        /// Action type: "snapshot" or "update" (set from parent message, not from JSON)
+        /// </summary>
+        [JsonIgnore]
+        public string Action { get; set; }
     }
 
     /// <summary>

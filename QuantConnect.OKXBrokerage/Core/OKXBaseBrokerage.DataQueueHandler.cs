@@ -16,9 +16,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Channels;
-using System.Threading.Tasks;
 using QuantConnect.Data;
 using QuantConnect.Logging;
 using QuantConnect.Packets;
@@ -47,11 +44,6 @@ namespace QuantConnect.Brokerages.OKX
         protected int _orderBookDepth = 400;
 
         /// <summary>
-        /// Order book state management (for incremental update synchronization)
-        /// </summary>
-        protected readonly ConcurrentDictionary<Symbol, OrderBookContext> _orderBookContexts = new();
-
-        /// <summary>
         /// Ticker quote cache for lightweight bid/ask from spot.tickers/futures.tickers channel
         /// Used as fallback when full order book is not subscribed
         /// </summary>
@@ -66,145 +58,6 @@ namespace QuantConnect.Brokerages.OKX
             public decimal BidPrice { get; set; }
             public decimal AskPrice { get; set; }
             public DateTime UpdateTime { get; set; }
-        }
-
-        /// <summary>
-        /// Enum representing the state of order book initialization and synchronization
-        /// </summary>
-        protected enum OrderBookState
-        {
-            /// <summary>
-            /// Initial state - WebSocket subscribed, caching messages, waiting for REST snapshot
-            /// </summary>
-            Initializing,
-
-            /// <summary>
-            /// REST snapshot received, applying cached messages to synchronize with live stream
-            /// </summary>
-            Syncing,
-
-            /// <summary>
-            /// Fully synchronized - applying incremental updates in real-time
-            /// </summary>
-            Synchronized,
-
-            /// <summary>
-            /// Error detected (e.g., sequence gap) - needs reinitialization
-            /// </summary>
-            Error
-        }
-
-        /// <summary>
-        /// Context for managing order book state, sequence IDs, and cached updates
-        /// </summary>
-        protected class OrderBookContext
-        {
-            /// <summary>
-            /// Reference to the parent brokerage instance
-            /// </summary>
-            public OKXBaseBrokerage Brokerage { get; set; }
-
-            /// <summary>
-            /// The order book instance
-            /// </summary>
-            public OKXOrderBook OrderBook { get; set; }
-
-            /// <summary>
-            /// Current synchronization state
-            /// </summary>
-            public OrderBookState State { get; set; }
-
-            /// <summary>
-            /// Last processed update ID (u field from WebSocket messages)
-            /// Used to validate sequence continuity
-            /// </summary>
-            public long LastUpdateId { get; set; }
-
-            /// <summary>
-            /// Base ID from REST API snapshot
-            /// Set when snapshot is retrieved
-            /// </summary>
-            public long BaseId { get; set; }
-
-            /// <summary>
-            /// Channel for message passing between WebSocket handler and processor
-            /// Replaces CachedUpdates - Channel naturally buffers messages
-            /// </summary>
-            public Channel<Messages.OrderBookUpdate> MessageChannel { get; set; }
-
-            /// <summary>
-            /// Currency pair for this order book (e.g., BTC_USDT)
-            /// </summary>
-            public string CurrencyPair { get; set; }
-
-            /// <summary>
-            /// LEAN Symbol for this order book
-            /// </summary>
-            public Symbol Symbol { get; set; }
-
-            /// <summary>
-            /// Timestamp of the last update (for monitoring)
-            /// </summary>
-            public DateTime LastUpdateTime { get; set; }
-
-            /// <summary>
-            /// Lock for thread-safe state transitions
-            /// </summary>
-            public readonly object Lock = new object();
-
-            /// <summary>
-            /// Cancellation token for consumer task
-            /// </summary>
-            public CancellationTokenSource CancellationToken { get; set; }
-
-            /// <summary>
-            /// Consumer task for processing order book updates
-            /// </summary>
-            public Task ConsumerTask { get; set; }
-
-            /// <summary>
-            /// Maximum number of updates to cache during initialization
-            /// </summary>
-            public const int MaxCacheSize = 100;
-
-            /// <summary>
-            /// Constructor
-            /// </summary>
-            public OrderBookContext(OKXBaseBrokerage brokerage, Symbol symbol, string currencyPair)
-            {
-                Brokerage = brokerage;
-                Symbol = symbol;
-                CurrencyPair = currencyPair;
-                OrderBook = new OKXOrderBook(symbol);
-                State = OrderBookState.Initializing;
-                LastUpdateId = 0;
-                BaseId = 0;
-                LastUpdateTime = DateTime.UtcNow;
-
-                // Create bounded Channel with DropOldest policy
-                MessageChannel = System.Threading.Channels.Channel.CreateBounded<Messages.OrderBookUpdate>(
-                    new BoundedChannelOptions(500)
-                    {
-                        FullMode = BoundedChannelFullMode.DropOldest,
-                        SingleReader = true,
-                        SingleWriter = true
-                    });
-
-                CancellationToken = new CancellationTokenSource();
-
-                // Start consumer task immediately (will wait for State change to Synchronized via WebSocket snapshot)
-                ConsumerTask = System.Threading.Tasks.Task.Run(() => Brokerage.ProcessOrderBookUpdatesAsync(this))
-                    .ContinueWith(task =>
-                    {
-                        if (task.IsFaulted)
-                        {
-                            Log.Error($"OKXBaseBrokerage.OrderBookContext: Consumer task faulted for {Symbol}: {task.Exception?.GetBaseException()?.Message}");
-                        }
-                    }, System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted);
-
-                // Note: OrderBook initialization now happens via WebSocket snapshot (action="snapshot")
-                // No need for separate REST API snapshot fetch
-            }
         }
 
         /// <summary>

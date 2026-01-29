@@ -16,7 +16,6 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using QuantConnect.Brokerages.OKX.Converters;
 using QuantConnect.Data.Market;
 using QuantConnect.Logging;
 
@@ -24,24 +23,189 @@ namespace QuantConnect.Brokerages.OKX
 {
     /// <summary>
     /// OKX Brokerage - OrderBook Management
-    /// Handles full order book state synchronization and maintenance
-    /// Copied from legacy OKXBrokerage.DataQueueHandler.cs
+    /// Handles order book synchronization using BrokerageMultiStateSynchronizer pattern
     /// </summary>
     public abstract partial class OKXBaseBrokerage
     {
         /// <summary>
-        /// Applies an order book update to the context
-        /// Updates bid/ask levels and sequence tracking
-        /// Single-consumer model ensures atomicity without locks
+        /// Order book synchronizer for managing multiple order book states
         /// </summary>
-        protected void ApplyOrderBookUpdate(OrderBookContext context, Messages.OrderBookUpdate update)
-        {
-            // Delegate to OKXOrderBook for incremental update logic
-            context.OrderBook.ApplyIncrementalUpdate(update.Bids, update.Asks);
+        protected BrokerageMultiStateSynchronizer<Symbol, OKXOrderBook, Messages.WebSocketOrderBook> _orderBookSync;
 
-            // Update sequence ID and timestamp
-            context.LastUpdateId = update.LastUpdateId;
-            context.LastUpdateTime = update.Time;
+        /// <summary>
+        /// Initializes the order book synchronizer
+        /// Must be called after RestApiClient is initialized
+        /// </summary>
+        protected virtual void InitializeOrderBookSync()
+        {
+            // Initialize order book synchronizer
+            // Uses BrokerageMultiStateSynchronizer for automatic message routing and gap recovery
+            _orderBookSync = new BrokerageMultiStateSynchronizer<Symbol, OKXOrderBook, Messages.WebSocketOrderBook>(
+                getKey: msg => _symbolMapper.GetLeanSymbol(msg.InstrumentId, GetSecurityType(msg.InstrumentId), Market.OKX),
+                reducer: OrderBookReducer,
+                capacity: 10000,
+                initializer: InitializeOrderBookAsync
+            );
+
+            // Subscribe to state changes to emit orderbook data
+            _orderBookSync.StateChanged += OnOrderBookStateChanged;
+
+            // Subscribe to errors to trigger refresh on gap detection
+            _orderBookSync.Error += OnOrderBookError;
+        }
+
+        /// <summary>
+        /// Initializes OrderBook state with full control over the workflow.
+        /// Called by BrokerageStateSynchronizer.ReinitializeAsync() which handles:
+        /// - Reentrancy protection (prevents concurrent initializations)
+        /// - Consumption pausing (messages buffer automatically)
+        /// </summary>
+        private async Task InitializeOrderBookAsync(Symbol symbol, BrokerageStateSynchronizer<OKXOrderBook, Messages.WebSocketOrderBook> sync)
+        {
+            Log.Trace($"{GetType().Name}.InitializeOrderBookAsync(): ENTRY for {symbol}");
+
+            // NOTE: PauseConsumption/ResumeConsumption is handled by ReinitializeAsync()
+            // This method only focuses on the initialization logic itself
+
+            // 1. Ensure State exists (silent, no event)
+            var orderBook = sync.State;
+            if (orderBook == null)
+            {
+                orderBook = new OKXOrderBook(symbol);
+                orderBook.BestBidAskUpdated += OnBestBidAskUpdated;
+                sync.SetStateSilent(orderBook);
+                _orderBooks[symbol] = orderBook;
+            }
+
+            Log.Trace($"{GetType().Name}.InitializeOrderBookAsync(): State created for {symbol}, waiting for WS snapshot");
+
+            // 2. OKX sends snapshot via WebSocket (unlike Gate which needs REST API call)
+            // Allow WebSocket messages to buffer - the first message with action="snapshot" will initialize the orderbook
+            await Task.Delay(500);
+
+            Log.Trace($"{GetType().Name}.InitializeOrderBookAsync(): Initialized {symbol}, waiting for snapshot via WebSocket");
+        }
+
+        /// <summary>
+        /// Reducer function for order book state updates
+        /// Processes snapshots and incremental updates
+        /// Throws exceptions on errors to trigger refresh via Error event
+        /// </summary>
+        protected OKXOrderBook OrderBookReducer(OKXOrderBook current, Messages.WebSocketOrderBook update)
+        {
+            // State should never be null after initialization
+            if (current == null)
+            {
+                throw new InvalidOperationException(
+                    $"OrderBook state is null for {update.InstrumentId} - initializer should have created it");
+            }
+
+            var time = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(update.Timestamp)).UtcDateTime;
+
+            // 1. Snapshot detection: action = "snapshot" or prevSeqId = -1
+            if (update.Action == "snapshot" || update.PreviousSequenceId == -1)
+            {
+                Log.Trace($"{GetType().Name}.OrderBookReducer(): Snapshot received for {current.Symbol}, seqId={update.SequenceId}, prevSeqId={update.PreviousSequenceId}");
+
+                // Apply full snapshot
+                current.ApplyFullSnapshot(update.Bids, update.Asks);
+
+                // Validate checksum if provided
+                if (update.Checksum.HasValue)
+                {
+                    if (!OKXChecksumValidator.ValidateChecksum(current, update.Checksum.Value, out var calculatedChecksum))
+                    {
+                        Log.Error($"{GetType().Name}.OrderBookReducer(): Checksum validation FAILED for {current.Symbol} snapshot! Expected: {update.Checksum.Value}, Calculated: {calculatedChecksum}");
+                        throw new InvalidOperationException($"Checksum validation failed for {current.Symbol} snapshot");
+                    }
+                    Log.Trace($"{GetType().Name}.OrderBookReducer(): Checksum validation passed for {current.Symbol} snapshot: {update.Checksum.Value}");
+                }
+
+                // Update sequence tracking
+                current.LastUpdateId = update.SequenceId ?? 0;
+                current.LastUpdateTime = time;
+                return current;
+            }
+
+            // 2. Keepalive detection: prevSeqId == seqId means no update
+            if (update.PreviousSequenceId == update.SequenceId)
+            {
+                return null; // Ignore keepalive
+            }
+
+            // 3. Sequence validation
+            if (update.SequenceId.HasValue && update.PreviousSequenceId.HasValue)
+            {
+                var expectedPrevSeqId = current.LastUpdateId;
+                var actualPrevSeqId = update.PreviousSequenceId.Value;
+                var currentSeqId = update.SequenceId.Value;
+
+                // Special case: sequence reset during maintenance (prevSeqId > seqId)
+                if (actualPrevSeqId > currentSeqId)
+                {
+                    Log.Trace($"{GetType().Name}.OrderBookReducer(): Sequence reset detected for {current.Symbol}, prevSeqId={actualPrevSeqId} > seqId={currentSeqId}. Continuing with new sequence.");
+                    // Continue processing with new sequence
+                }
+                // Normal case: validate sequence continuity
+                else if (actualPrevSeqId != expectedPrevSeqId && expectedPrevSeqId > 0)
+                {
+                    throw new InvalidOperationException(
+                        $"OrderBook sequence gap detected for {current.Symbol}: expected prevSeqId={expectedPrevSeqId}, got prevSeqId={actualPrevSeqId}, seqId={currentSeqId}");
+                }
+
+                // Apply incremental update
+                current.ApplyIncrementalUpdate(update.Bids, update.Asks);
+
+                // Validate checksum if provided
+                if (update.Checksum.HasValue)
+                {
+                    if (!OKXChecksumValidator.ValidateChecksum(current, update.Checksum.Value, out var calculatedChecksum))
+                    {
+                        throw new InvalidOperationException(
+                            $"Checksum validation failed for {current.Symbol} update: expected={update.Checksum.Value}, calculated={calculatedChecksum}, seqId={currentSeqId}");
+                    }
+                }
+
+                current.LastUpdateId = currentSeqId;
+                current.LastUpdateTime = time;
+            }
+            else
+            {
+                // No sequence IDs present (shouldn't happen for books channel, but handle gracefully)
+                current.ApplyIncrementalUpdate(update.Bids, update.Asks);
+
+                // Validate checksum if provided
+                if (update.Checksum.HasValue)
+                {
+                    if (!OKXChecksumValidator.ValidateChecksum(current, update.Checksum.Value, out var calculatedChecksum))
+                    {
+                        throw new InvalidOperationException(
+                            $"Checksum validation failed for {current.Symbol} update: expected={update.Checksum.Value}, calculated={calculatedChecksum}");
+                    }
+                }
+
+                current.LastUpdateTime = time;
+            }
+
+            return current;
+        }
+
+        /// <summary>
+        /// Handles order book state changes - emits Orderbook data
+        /// </summary>
+        private void OnOrderBookStateChanged(object sender, KeyedStateChangedEventArgs<Symbol, OKXOrderBook> e)
+        {
+            // Emit full orderbook data
+            var orderBook = _orderBookSync?.GetState(e.Key);
+            if (orderBook != null)
+            {
+                var orderbookData = orderBook.ToOrderbook();
+
+                lock (_aggregator)
+                {
+                    _aggregator.Update(orderbookData);
+                }
+            }
         }
 
         /// <summary>
@@ -70,22 +234,30 @@ namespace QuantConnect.Brokerages.OKX
                 {
                     _aggregator.Update(quoteTick);
                 }
-
-                // Emit orderbook depth (full depth levels)
-                if (_orderBooks.TryGetValue(e.Symbol, out var orderBook))
-                {
-                    var orderbook = orderBook.ToOrderbook();
-
-                    lock (_aggregator)
-                    {
-                        _aggregator.Update(orderbook);
-                    }
-                }
             }
             catch (Exception ex)
             {
                 Log.Error($"{GetType().Name}.OnBestBidAskUpdated(): {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Handles order book errors - re-initializes on gap detection.
+        /// Uses ReinitializeAsync() which provides:
+        /// - Reentrancy protection (skips if already initializing)
+        /// - Automatic consumption pausing (set synchronously before returning)
+        /// </summary>
+        private void OnOrderBookError(object sender, KeyedErrorEventArgs<Symbol> e)
+        {
+            Log.Trace($"{GetType().Name}.OnOrderBookError(): {e.Key} - {e.Exception.Message}");
+
+            var sync = _orderBookSync?.GetSynchronizer(e.Key);
+            if (sync == null)
+                return;
+
+            // ReinitializeAsync handles reentrancy and consumption pausing
+            // Fire-and-forget: _consumptionPaused is set synchronously before ReinitializeAsync returns
+            _ = sync.ReinitializeAsync();
         }
 
         /// <summary>
@@ -141,127 +313,6 @@ namespace QuantConnect.Brokerages.OKX
             }
 
             return Task.CompletedTask;
-        }
-
-        /// <summary>
-        /// Consumer task that processes order book updates from the channel
-        /// Single-threaded per symbol, runs for the lifetime of the OrderBookContext
-        /// </summary>
-        protected async Task ProcessOrderBookUpdatesAsync(OrderBookContext context)
-        {
-            try
-            {
-                // Defensive: Check for null CancellationToken
-                if (context.CancellationToken == null)
-                {
-                    Log.Error($"{GetType().Name}.ProcessOrderBookUpdatesAsync(): CancellationToken is null for {context.Symbol}, consumer exiting");
-                    return;
-                }
-
-                while (!context.CancellationToken.IsCancellationRequested)
-                {
-                    // State check - wait during initialization or syncing
-                    while ((context.State == OrderBookState.Initializing ||
-                            context.State == OrderBookState.Syncing) &&
-                           !context.CancellationToken.IsCancellationRequested)
-                    {
-                        await Task.Delay(100);
-                    }
-
-                    if (context.CancellationToken.IsCancellationRequested)
-                    {
-                        break;
-                    }
-
-                    // Wait for message from Channel
-                    if (await context.MessageChannel.Reader.WaitToReadAsync(context.CancellationToken.Token))
-                    {
-                        while (context.MessageChannel.Reader.TryRead(out var update))
-                        {
-                            try
-                            {
-                                // Handle different update types
-                                if (update.Full)
-                                {
-                                    // Full snapshot - reset order book
-                                    Log.Trace($"{GetType().Name}.ProcessOrderBookUpdatesAsync(): Full snapshot received for {context.Symbol}");
-
-                                    lock (context.Lock)
-                                    {
-                                        // Delegate to OKXOrderBook for full snapshot logic
-                                        context.OrderBook.ApplyFullSnapshot(update.Bids, update.Asks);
-
-                                        context.LastUpdateId = update.LastUpdateId;
-                                        context.LastUpdateTime = update.Time;
-                                    }
-                                }
-                                else
-                                {
-                                    // Incremental update - check sequence continuity
-                                    if (context.State == OrderBookState.Synchronized)
-                                    {
-                                        // Gap detection with overflow protection
-                                        // Note: Use checked arithmetic to detect overflow, or validate bounds first
-                                        long expectedNextId;
-                                        bool overflowDetected = false;
-
-                                        try
-                                        {
-                                            expectedNextId = checked(context.LastUpdateId + 1);
-                                        }
-                                        catch (OverflowException)
-                                        {
-                                            // Overflow detected - treat as gap and reinitialize
-                                            overflowDetected = true;
-                                            expectedNextId = 0;
-                                            Log.Error($"{GetType().Name}.ProcessOrderBookUpdatesAsync(): Sequence ID overflow detected for {context.Symbol}! LastUpdateId={context.LastUpdateId}. Reinitializing...");
-                                        }
-
-                                        if (overflowDetected || update.FirstUpdateId > expectedNextId)
-                                        {
-                                            // Sequence gap detected - clear orderbook and wait for next snapshot
-                                            Log.Error($"{GetType().Name}.ProcessOrderBookUpdatesAsync(): Sequence gap detected for {context.Symbol}. Expected: {expectedNextId}, Got: {update.FirstUpdateId}. Waiting for snapshot...");
-
-                                            lock (context.Lock)
-                                            {
-                                                context.OrderBook.BestBidAskUpdated -= OnBestBidAskUpdated;
-                                                context.OrderBook.Clear();
-                                                context.State = OrderBookState.Initializing;
-                                                context.LastUpdateId = 0;
-                                                context.BaseId = 0;
-                                            }
-                                            continue;
-                                        }
-
-                                        // Skip outdated messages
-                                        if (update.LastUpdateId <= context.LastUpdateId)
-                                        {
-                                            continue;
-                                        }
-
-                                        // Apply incremental update
-                                        ApplyOrderBookUpdate(context, update);
-                                    }
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Log.Error($"{GetType().Name}.ProcessOrderBookUpdatesAsync(): Error processing update for {context.Symbol}: {ex.Message}");
-                            }
-                        }
-                    }
-                }
-
-                Log.Trace($"{GetType().Name}.ProcessOrderBookUpdatesAsync(): Consumer stopped for {context.Symbol}");
-            }
-            catch (OperationCanceledException)
-            {
-                Log.Trace($"{GetType().Name}.ProcessOrderBookUpdatesAsync(): Consumer cancelled for {context.Symbol}");
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.ProcessOrderBookUpdatesAsync(): Fatal error for {context.Symbol}: {ex.Message}");
-            }
         }
     }
 }
