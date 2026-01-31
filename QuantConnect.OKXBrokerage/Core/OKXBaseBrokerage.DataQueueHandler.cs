@@ -205,9 +205,9 @@ namespace QuantConnect.Brokerages.OKX
         /// <returns>True if selection can be performed</returns>
         public bool CanPerformSelection()
         {
-            // LookupSymbols uses REST API (doesn't require WebSocket)
-            // Verify brokerage is initialized
-            return RestApiClient != null;
+            // LookupSymbols uses SymbolMapper (Symbol Properties Database)
+            // Always available once brokerage is constructed
+            return _symbolMapper != null;
         }
 
         /// <summary>
@@ -221,8 +221,8 @@ namespace QuantConnect.Brokerages.OKX
         {
             Log.Trace($"{GetType().Name}.LookupSymbols(): {symbol} includeExpired={includeExpired} securityCurrency={securityCurrency}");
 
-            // Use REST API to fetch available symbols
-            return RestApiClient.LookupSymbols(symbol, includeExpired, securityCurrency);
+            // Use SymbolMapper to lookup symbols from Symbol Properties Database
+            return ((OKXSymbolMapper)_symbolMapper).LookupSymbols(symbol, includeExpired, securityCurrency);
         }
 
         // ========================================

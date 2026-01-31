@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Collections.Generic;
 using QuantConnect.Securities;
 
 namespace QuantConnect.Brokerages.OKX
@@ -84,5 +85,30 @@ namespace QuantConnect.Brokerages.OKX
         /// <returns>True if the brokerage supports the symbol</returns>
         public bool IsKnownBrokerageSymbol(string brokerageSymbol)
             => _baseMapper.IsKnownBrokerageSymbol(brokerageSymbol);
+
+        /// <summary>
+        /// Lookup symbols matching specified criteria from Symbol Properties Database
+        /// </summary>
+        /// <param name="symbol">The symbol to lookup (used for SecurityType and Market)</param>
+        /// <param name="includeExpired">Include expired contracts (not applicable for crypto)</param>
+        /// <param name="securityCurrency">Expected security currency (quote currency filter)</param>
+        /// <returns>Matching symbols</returns>
+        public IEnumerable<Symbol> LookupSymbols(Symbol symbol, bool includeExpired, string securityCurrency = null)
+        {
+            var database = SymbolPropertiesDatabase.FromDataFolder();
+            var symbolPropertiesList = database.GetSymbolPropertiesList(Market.OKX, symbol.SecurityType);
+
+            foreach (var kvp in symbolPropertiesList)
+            {
+                // Filter by quote currency if specified
+                if (!string.IsNullOrEmpty(securityCurrency) &&
+                    !kvp.Value.QuoteCurrency.Equals(securityCurrency, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                yield return Symbol.Create(kvp.Key.Symbol, symbol.SecurityType, Market.OKX);
+            }
+        }
     }
 }
