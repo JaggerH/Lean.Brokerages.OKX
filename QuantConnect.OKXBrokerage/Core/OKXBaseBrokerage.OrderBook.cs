@@ -62,8 +62,6 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         private async Task InitializeOrderBookAsync(Symbol symbol, BrokerageStateSynchronizer<OKXOrderBook, Messages.WebSocketOrderBook> sync)
         {
-            Log.Trace($"{GetType().Name}.InitializeOrderBookAsync(): ENTRY for {symbol}");
-
             // NOTE: PauseConsumption/ResumeConsumption is handled by ReinitializeAsync()
             // This method only focuses on the initialization logic itself
 
@@ -75,15 +73,8 @@ namespace QuantConnect.Brokerages.OKX
                 orderBook.BestBidAskUpdated += OnBestBidAskUpdated;
                 sync.SetStateSilent(orderBook);
                 _orderBooks[symbol] = orderBook;
+                Log.Trace($"{GetType().Name}.InitializeOrderBookAsync(): State created for {symbol}, waiting for WS snapshot");
             }
-
-            Log.Trace($"{GetType().Name}.InitializeOrderBookAsync(): State created for {symbol}, waiting for WS snapshot");
-
-            // 2. OKX sends snapshot via WebSocket (unlike Gate which needs REST API call)
-            // Allow WebSocket messages to buffer - the first message with action="snapshot" will initialize the orderbook
-            await Task.Delay(500);
-
-            Log.Trace($"{GetType().Name}.InitializeOrderBookAsync(): Initialized {symbol}, waiting for snapshot via WebSocket");
         }
 
         /// <summary>

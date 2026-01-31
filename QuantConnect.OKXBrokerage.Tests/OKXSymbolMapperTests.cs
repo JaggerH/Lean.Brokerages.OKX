@@ -122,33 +122,17 @@ namespace QuantConnect.Brokerages.OKX.Tests
         }
 
         /// <summary>
-        /// Tests OKX → LEAN conversion: BTC-USDT-250328 → BTCUSDT28H25 (Future, expiry: 2025-03-28)
-        /// Note: LEAN appends expiry code to delivery futures symbol values
-        /// Note: Symbol.CreateFuture() uses SecurityType.Future, not CryptoFuture
+        /// Tests OKX → LEAN conversion for delivery futures throws when not in CSV database.
+        /// Delivery futures like BTC-USDT-250328 must be explicitly mapped in symbol-properties-database.csv.
         /// </summary>
         [Test]
-        public void GetLeanSymbol_DeliveryFutures_BTCUSDT()
+        public void GetLeanSymbol_DeliveryFutures_NotInDatabase_ThrowsException()
         {
-            var brokerageSymbol = "BTC-USDT-250328";
-            var symbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.CryptoFuture, Market.OKX);
-
-            Assert.IsTrue(symbol.Value.Contains("BTCUSDT"), $"Symbol value should contain BTCUSDT, got: {symbol.Value}");
-            Assert.AreEqual(SecurityType.Future, symbol.SecurityType);
-            Assert.AreEqual(new DateTime(2025, 3, 28), symbol.ID.Date, "Should parse expiry date correctly");
-        }
-
-        /// <summary>
-        /// Tests OKX → LEAN conversion: ETH-USDT-251231 → ETHUSDT31Z25 (CryptoFuture, expiry: 2025-12-31)
-        /// Note: LEAN appends expiry code to delivery futures symbol values
-        /// </summary>
-        [Test]
-        public void GetLeanSymbol_DeliveryFutures_ETHUSDT()
-        {
-            var brokerageSymbol = "ETH-USDT-251231";
-            var symbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.CryptoFuture, Market.OKX);
-
-            Assert.IsTrue(symbol.Value.Contains("ETHUSDT"), $"Symbol value should contain ETHUSDT, got: {symbol.Value}");
-            Assert.AreEqual(new DateTime(2025, 12, 31), symbol.ID.Date);
+            // Delivery futures are not in CSV database - expect exception
+            Assert.Throws<ArgumentException>(() =>
+                _mapper.GetLeanSymbol("BTC-USDT-250328", SecurityType.CryptoFuture, Market.OKX));
+            Assert.Throws<ArgumentException>(() =>
+                _mapper.GetLeanSymbol("ETH-USDT-251231", SecurityType.CryptoFuture, Market.OKX));
         }
 
         #endregion
@@ -189,19 +173,17 @@ namespace QuantConnect.Brokerages.OKX.Tests
         }
 
         /// <summary>
-        /// Tests round-trip conversion for delivery futures symbols
+        /// Tests that delivery futures symbols not in CSV database throw exception.
+        /// Round-trip conversion requires symbols to be explicitly mapped in symbol-properties-database.csv.
         /// </summary>
         [Test]
-        public void RoundTrip_DeliveryFutures_BTCUSDT()
+        public void RoundTrip_DeliveryFutures_NotInDatabase_ThrowsException()
         {
             var expiryDate = new DateTime(2025, 3, 28);
             var originalSymbol = Symbol.CreateFuture("BTCUSDT", Market.OKX, expiryDate);
-            var brokerageSymbol = _mapper.GetBrokerageSymbol(originalSymbol);
-            var convertedSymbol = _mapper.GetLeanSymbol(brokerageSymbol, SecurityType.CryptoFuture, Market.OKX);
 
-            Assert.AreEqual(originalSymbol.Value, convertedSymbol.Value);
-            Assert.AreEqual(originalSymbol.SecurityType, convertedSymbol.SecurityType);
-            Assert.AreEqual(originalSymbol.ID.Date, convertedSymbol.ID.Date);
+            // Delivery futures are not in CSV database - expect exception
+            Assert.Throws<ArgumentException>(() => _mapper.GetBrokerageSymbol(originalSymbol));
         }
 
         #endregion
@@ -229,13 +211,15 @@ namespace QuantConnect.Brokerages.OKX.Tests
         }
 
         /// <summary>
-        /// Tests that GetBrokerageSecurityType correctly identifies delivery futures
+        /// Tests that GetBrokerageSecurityType throws for delivery futures not in CSV database.
+        /// All symbols must be explicitly mapped in symbol-properties-database.csv.
         /// </summary>
         [Test]
-        public void GetBrokerageSecurityType_DeliveryFutures()
+        public void GetBrokerageSecurityType_DeliveryFutures_NotInDatabase_ThrowsException()
         {
-            Assert.AreEqual(SecurityType.CryptoFuture, _mapper.GetBrokerageSecurityType("BTC-USDT-250328"));
-            Assert.AreEqual(SecurityType.CryptoFuture, _mapper.GetBrokerageSecurityType("ETH-USDT-251231"));
+            // Delivery futures are not in CSV database - expect exception
+            Assert.Throws<ArgumentException>(() => _mapper.GetBrokerageSecurityType("BTC-USDT-250328"));
+            Assert.Throws<ArgumentException>(() => _mapper.GetBrokerageSecurityType("ETH-USDT-251231"));
         }
 
         #endregion
