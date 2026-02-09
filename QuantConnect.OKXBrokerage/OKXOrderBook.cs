@@ -47,6 +47,16 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
+        /// Gets the number of bid price levels
+        /// </summary>
+        public int BidCount => Bids.Count;
+
+        /// <summary>
+        /// Gets the number of ask price levels
+        /// </summary>
+        public int AskCount => Asks.Count;
+
+        /// <summary>
         /// Applies a full order book snapshot from OKX WebSocket format.
         /// Clears existing data and applies new snapshot atomically.
         /// </summary>
