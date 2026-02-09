@@ -62,6 +62,8 @@ namespace QuantConnect.Brokerages.OKX
                 var bar = ConvertResolutionToBar(request.Resolution);
                 var startMs = new DateTimeOffset(request.StartTimeUtc).ToUnixTimeMilliseconds();
                 var endMs = new DateTimeOffset(request.EndTimeUtc).ToUnixTimeMilliseconds();
+                var period = request.Resolution.ToTimeSpan();
+                var isQuoteBar = request.DataType == typeof(QuoteBar);
 
                 // Pagination: OKX returns max 100 candles per request
                 // Use 'before' parameter for historical data pagination
@@ -94,7 +96,14 @@ namespace QuantConnect.Brokerages.OKX
 
                         if (candle.Timestamp <= endMs)
                         {
-                            yield return candle.ToTradeBar(request.Symbol);
+                            if (isQuoteBar)
+                            {
+                                yield return candle.ToQuoteBar(request.Symbol, period);
+                            }
+                            else
+                            {
+                                yield return candle.ToTradeBar(request.Symbol, period);
+                            }
                             candleCount++;
                         }
                     }
