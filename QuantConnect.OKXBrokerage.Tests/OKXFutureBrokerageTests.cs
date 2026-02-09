@@ -198,6 +198,14 @@ namespace QuantConnect.Brokerages.OKX.Tests
         }
 
         [Test]
+        [TestCaseSource(nameof(OrderParameters))]
+        [Category("Futures")]
+        public void FutureCloseFromShort(OrderTestParameters parameters)
+        {
+            base.CloseFromShort(parameters);
+        }
+
+        [Test]
         [Category("Futures")]
         public override void GetAccountHoldings()
         {

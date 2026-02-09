@@ -17,19 +17,19 @@
 
 ```powershell
 # LongFromZero - 从零仓位开多仓
-dotnet test --no-build --filter "FullyQualifiedName~FuturesLongFromZero"
+dotnet test --no-build --filter "FullyQualifiedName~FutureLongFromZero"
 
 # ShortFromZero - 从零仓位开空仓
-dotnet test --no-build --filter "FullyQualifiedName~FuturesShortFromZero"
+dotnet test --no-build --filter "FullyQualifiedName~FutureShortFromZero"
 
 # CloseFromLong - 从多仓平仓
-dotnet test --no-build --filter "FullyQualifiedName~FuturesCloseFromLong"
+dotnet test --no-build --filter "FullyQualifiedName~FutureCloseFromLong"
 
 # CloseFromShort - 从空仓平仓
-dotnet test --no-build --filter "FullyQualifiedName~FuturesCloseFromShort"
+dotnet test --no-build --filter "FullyQualifiedName~FutureCloseFromShort"
 
 # CancelOrders - 取消订单测试
-dotnet test --no-build --filter "FullyQualifiedName~FuturesCancelOrders"
+dotnet test --no-build --filter "FullyQualifiedName~FutureCancelOrders"
 ```
 
 ### Spot 市场测试
@@ -45,38 +45,19 @@ dotnet test --no-build --filter "FullyQualifiedName~SpotCloseFromLong"
 dotnet test --no-build --filter "FullyQualifiedName~SpotCancelOrders"
 ```
 
-### Unified 账户测试
-
-```powershell
-# LongFromZero - 测试 Spot + Futures 双市场
-dotnet test --no-build --filter "FullyQualifiedName~UnifiedLongFromZero"
-
-# ShortFromZero
-dotnet test --no-build --filter "FullyQualifiedName~UnifiedShortFromZero"
-
-# CloseFromLong
-dotnet test --no-build --filter "FullyQualifiedName~UnifiedCloseFromLong"
-
-# CloseFromShort
-dotnet test --no-build --filter "FullyQualifiedName~UnifiedCloseFromShort"
-
-# CancelOrders
-dotnet test --no-build --filter "FullyQualifiedName~UnifiedCancelOrders"
-```
-
 ---
 
 ## 🔍 按测试类过滤
 
 ```powershell
 # 运行 Spot 市场所有测试
-dotnet test --no-build --filter "FullyQualifiedName~GateBrokerageSpotTests"
+dotnet test --no-build --filter "FullyQualifiedName~OKXBrokerageSpotTests"
 
 # 运行 Futures 市场所有测试
-dotnet test --no-build --filter "FullyQualifiedName~GateBrokerageFuturesTests"
+dotnet test --no-build --filter "FullyQualifiedName~OKXBrokerageFuturesTests"
 
 # 运行 Unified 账户所有测试
-dotnet test --no-build --filter "FullyQualifiedName~GateBrokerageUnifiedTests"
+dotnet test --no-build --filter "FullyQualifiedName~OKXBrokerageUnifiedTests"
 ```
 
 ---
@@ -89,15 +70,6 @@ dotnet test --no-build --filter "TestCategory=Spot"
 
 # Futures 市场所有测试
 dotnet test --no-build --filter "TestCategory=Futures"
-
-# Unified 账户所有测试
-dotnet test --no-build --filter "TestCategory=Unified"
-
-# Unified 账户基础测试（不包含压力测试）
-dotnet test --no-build --filter "TestCategory=Unified-Basic"
-
-# 压力测试
-dotnet test --no-build --filter "TestCategory=Stress"
 ```
 
 ---
@@ -106,7 +78,7 @@ dotnet test --no-build --filter "TestCategory=Stress"
 
 ```powershell
 # 使用完整命名空间（最精确）
-dotnet test --no-build --filter "FullyQualifiedName=QuantConnect.Brokerages.Gate.Tests.GateBrokerageFuturesTests.FuturesLongFromZero"
+dotnet test --no-build --filter "FullyQualifiedName=QuantConnect.Brokerages.OKX.Tests.OKXBrokerageFuturesTests.FuturesLongFromZero"
 
 # 不重新编译
 dotnet test --no-build --filter "FullyQualifiedName~FuturesLongFromZero" --no-build
@@ -134,8 +106,6 @@ dotnet test --no-build --filter "FullyQualifiedName~SpotLongFromZero"
 # Futures 市场运行 2 个测试用例
 dotnet test --no-build --filter "FullyQualifiedName~FuturesLongFromZero"
 
-# Unified 账户运行 4 个测试用例（Spot_Market + Spot_Limit + Futures_Market + Futures_Limit）
-dotnet test --no-build --filter "FullyQualifiedName~UnifiedLongFromZero"
 ```
 
 **注意**: 无法直接通过 `dotnet test --no-build --filter` 过滤到单个参数化测试用例（如只运行 Spot_MarketOrder）。如需运行特定用例，建议临时注释 `OrderParameters` 数组中的其他用例。
