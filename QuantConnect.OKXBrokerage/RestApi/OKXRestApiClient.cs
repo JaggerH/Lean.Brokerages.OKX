@@ -252,13 +252,13 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         }
 
         /// <summary>
-        /// Gets ticker information for a specific instrument
+        /// Gets ticker for a specific instrument via OKX v5 API
         /// https://www.okx.com/docs-v5/en/#rest-api-market-data-get-ticker
-        /// No authentication required
+        /// Overrides Gate.io base class endpoint
         /// </summary>
-        /// <param name="instId">Instrument ID (e.g., BTC-USDT)</param>
-        /// <returns>Ticker information, or null if request fails</returns>
-        public Ticker GetTickerInfo(string instId)
+        /// <param name="instId">Instrument ID (e.g., BTC-USDT, BTC-USDT-SWAP)</param>
+        /// <returns>List containing single ticker, or empty list</returns>
+        public override List<Ticker> GetTicker(string instId)
         {
             try
             {
@@ -270,16 +270,64 @@ namespace QuantConnect.Brokerages.OKX.RestApi
 
                 if (response == null || !response.IsSuccess || response.Data == null || response.Data.Count == 0)
                 {
-                    Log.Error($"OKXRestApiClient.GetTickerInfo(): Failed to get ticker - code: {response?.Code}, msg: {response?.Message}");
-                    return null;
+                    Log.Error($"OKXRestApiClient.GetTicker(): Failed - code: {response?.Code}, msg: {response?.Message}");
+                    return new List<Ticker>();
                 }
 
-                return response.Data[0];
+                return response.Data;
             }
             catch (Exception ex)
             {
-                Log.Error($"OKXRestApiClient.GetTickerInfo(): Exception: {ex.Message}");
-                return null;
+                Log.Error($"OKXRestApiClient.GetTicker(): Exception: {ex.Message}");
+                return new List<Ticker>();
+            }
+        }
+
+        /// <summary>
+        /// Gets all tickers via OKX v5 API (SPOT + SWAP combined)
+        /// https://www.okx.com/docs-v5/en/#rest-api-market-data-get-tickers
+        /// Overrides Gate.io base class endpoint
+        /// </summary>
+        /// <returns>List of all tickers (spot + swap)</returns>
+        public override List<Ticker> GetTicker()
+        {
+            var result = new List<Ticker>();
+            foreach (var instType in new[] { "SPOT", "SWAP" })
+            {
+                result.AddRange(GetTickers(instType));
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Gets all tickers for a specific instrument type
+        /// https://www.okx.com/docs-v5/en/#rest-api-market-data-get-tickers
+        /// No authentication required
+        /// </summary>
+        /// <param name="instType">Instrument type: SPOT, SWAP, FUTURES, OPTION</param>
+        /// <returns>List of tickers for the instrument type</returns>
+        public List<Ticker> GetTickers(string instType)
+        {
+            try
+            {
+                var queryString = $"instType={instType}";
+                var response = GetPublic<OKXApiResponse<Ticker>>(
+                    "/market/tickers",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess)
+                {
+                    Log.Error($"OKXRestApiClient.GetTickers(): Failed for {instType} - code: {response?.Code}, msg: {response?.Message}");
+                    return new List<Ticker>();
+                }
+
+                return response.Data ?? new List<Ticker>();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetTickers(): Exception: {ex.Message}");
+                return new List<Ticker>();
             }
         }
 

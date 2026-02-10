@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Linq;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
@@ -138,7 +139,7 @@ namespace QuantConnect.Brokerages.OKX
         private bool PlaceSpotMarketBuyAsFokLimit(Order order, string instId, string tdMode)
         {
             // 1. Get BestAsk price via REST API
-            var ticker = RestApiClient.GetTickerInfo(instId);
+            var ticker = RestApiClient.GetTicker(instId)?.FirstOrDefault();
             var bestAsk = ticker?.LowestAsk ?? 0m;
 
             if (bestAsk <= 0)

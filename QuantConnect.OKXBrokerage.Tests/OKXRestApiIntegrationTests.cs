@@ -137,12 +137,12 @@ namespace QuantConnect.Brokerages.OKX.Tests
         }
 
         /// <summary>
-        /// Tests GetTickerInfo endpoint
+        /// Tests GetTicker endpoint for single instrument
         /// </summary>
         [Test]
-        public void GetTickerInfo_BtcUsdt_ReturnsTicker()
+        public void GetTicker_BtcUsdt_ReturnsTicker()
         {
-            var ticker = _client.GetTickerInfo("BTC-USDT");
+            var ticker = _client.GetTicker("BTC-USDT")?.FirstOrDefault();
 
             Assert.IsNotNull(ticker, "Ticker should not be null");
             Assert.AreEqual("BTC-USDT", ticker.CurrencyPair);
@@ -325,11 +325,11 @@ namespace QuantConnect.Brokerages.OKX.Tests
         /// Tests error handling for invalid instrument ID
         /// </summary>
         [Test]
-        public void GetTickerInfo_InvalidInstrument_ReturnsNull()
+        public void GetTicker_InvalidInstrument_ReturnsEmpty()
         {
-            var ticker = _client.GetTickerInfo("INVALID-PAIR");
+            var tickers = _client.GetTicker("INVALID-PAIR");
 
-            Assert.IsNull(ticker, "Should return null for invalid instrument");
+            Assert.IsEmpty(tickers, "Should return empty list for invalid instrument");
         }
 
         /// <summary>

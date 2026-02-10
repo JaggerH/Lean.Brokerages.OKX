@@ -16,6 +16,7 @@
 using System.Linq;
 using NUnit.Framework;
 using QuantConnect.Brokerages.OKX;
+using QuantConnect.Securities;
 
 namespace QuantConnect.OKXBrokerage.Tests
 {
@@ -181,6 +182,37 @@ namespace QuantConnect.OKXBrokerage.Tests
 
                 // Second symbol can be OKX (Futures) or USA (Equity)
                 Assert.That(pair[1].ID.Market, Is.EqualTo(Market.OKX).Or.EqualTo(Market.USA));
+            }
+        }
+
+        [Test]
+        public void GetSpotFuturePairs_MatchingAndVolumeFilter()
+        {
+            // 1) No volume filter - verify matching works
+            var allPairs = OKXPairMatcher.GetSpotFuturePairs(minVolumeUsdt: 0m);
+
+            Assert.IsNotNull(allPairs);
+            Assert.Greater(allPairs.Count, 0, "Should find at least one spot-future pair");
+
+            TestContext.WriteLine($"=== No Volume Filter: {allPairs.Count} pairs ===");
+            foreach (var pair in allPairs.Take(5))
+            {
+                TestContext.WriteLine($"  Spot: {pair[0].Value} ({pair[0].SecurityType})  <->  Future: {pair[1].Value} ({pair[1].SecurityType})");
+                Assert.AreEqual(SecurityType.Crypto, pair[0].SecurityType);
+                Assert.AreEqual(SecurityType.CryptoFuture, pair[1].SecurityType);
+                Assert.AreEqual(pair[0].Value, pair[1].Value);
+            }
+
+            // 2) Default volume filter - verify filtering works
+            var filteredPairs = OKXPairMatcher.GetSpotFuturePairs();
+
+            Assert.IsNotNull(filteredPairs);
+            Assert.Less(filteredPairs.Count, allPairs.Count, "Volume filter should reduce pair count");
+
+            TestContext.WriteLine($"\n=== Volume Filter ({OKXPairMatcher.DefaultMinVolumeUsdt:N0} USDT): {filteredPairs.Count} pairs ===");
+            foreach (var pair in filteredPairs.Take(5))
+            {
+                TestContext.WriteLine($"  Spot: {pair[0].Value} ({pair[0].SecurityType})  <->  Future: {pair[1].Value} ({pair[1].SecurityType})");
             }
         }
     }

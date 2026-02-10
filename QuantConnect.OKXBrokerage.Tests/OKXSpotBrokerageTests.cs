@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Linq;
 using NUnit.Framework;
 using QuantConnect.Interfaces;
 using QuantConnect.Securities;
@@ -119,7 +120,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 var client = new OKXRestApiClient(apiKey, apiSecret, passphrase);
 
                 // Get ticker data for BTC-USDT
-                var ticker = client.GetTickerInfo("BTC-USDT");
+                var ticker = client.GetTicker("BTC-USDT")?.FirstOrDefault();
 
                 if (ticker != null && ticker.LowestAsk > 0 && ticker.HighestBid > 0)
                 {

@@ -377,31 +377,30 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Filters SymbolPairs by volume threshold
         /// Only checks Market.OKX symbols, skips non-OKX symbols (e.g., EquitySymbol)
+        /// Uses OKX v5 /market/tickers endpoint with instType parameter
         /// </summary>
         /// <param name="pairs">List of SymbolPairs to filter</param>
-        /// <param name="spotClient">Spot REST API client for volume data</param>
-        /// <param name="futuresClient">Futures REST API client for volume data</param>
         /// <param name="minVolumeUsdt">Minimum 24h USDT volume threshold</param>
         /// <returns>Filtered list of SymbolPairs with volume data, sorted by volume descending</returns>
         private static List<SymbolPair> FilterByVolume(
             List<SymbolPair> pairs,
             decimal minVolumeUsdt)
         {
-            var (spotClient, futuresClient) = CreateApiClients();
-            // Fetch tickers for volume data
-            var spotTickers = spotClient.GetTicker()?
+            var client = CreateApiClient();
+            var symbolMapper = new OKXSymbolMapper(Market.OKX);
+
+            // Fetch all tickers (SPOT + SWAP) in one call
+            var allTickers = client.GetTicker()
                 .Where(t => !string.IsNullOrEmpty(t.CurrencyPair))
                 .ToDictionary(t => t.CurrencyPair, t => t);
 
-            var futuresTickers = futuresClient.GetTicker()?
-                .Where(t => !string.IsNullOrEmpty(t.CurrencyPair))
-                .ToDictionary(t => t.CurrencyPair, t => t);
-
-            if (spotTickers == null && futuresTickers == null)
+            if (allTickers.Count == 0)
             {
                 Log.Error("OKXPairMatcher.FilterByVolume(): Failed to fetch any tickers");
                 return new List<SymbolPair>();
             }
+
+            Log.Trace($"OKXPairMatcher.FilterByVolume(): Fetched {allTickers.Count} tickers");
 
             var qualifiedPairs = new List<(SymbolPair Pair, decimal MaxVolume)>();
 
@@ -416,12 +415,19 @@ namespace QuantConnect.Brokerages.OKX
                     if (symbol.ID.Market != Market.OKX)
                         continue;
 
-                    var okxSymbol = ConvertLeanSymbolToOKXFormat(symbol.Value);
-                    var tickers = symbol.SecurityType == SecurityType.CryptoFuture
-                        ? futuresTickers
-                        : spotTickers;
+                    // Use SymbolMapper to get the correct OKX instId (e.g., BTC-USDT, BTC-USDT-SWAP)
+                    string instId;
+                    try
+                    {
+                        instId = symbolMapper.GetBrokerageSymbol(symbol);
+                    }
+                    catch (ArgumentException)
+                    {
+                        allOKXLegsQualified = false;
+                        break;
+                    }
 
-                    if (tickers?.TryGetValue(okxSymbol, out var ticker) == true &&
+                    if (allTickers.TryGetValue(instId, out var ticker) &&
                         !string.IsNullOrEmpty(ticker.QuoteVolume) &&
                         decimal.TryParse(ticker.QuoteVolume, NumberStyles.Any, CultureInfo.InvariantCulture, out var volume))
                     {
@@ -454,65 +460,19 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Converts LEAN symbol format to OKX format
-        /// Example: BTCUSDT → BTC_USDT
-        /// </summary>
-        /// <param name="leanSymbol">LEAN symbol (e.g., BTCUSDT)</param>
-        /// <returns>OKX format symbol (e.g., BTC_USDT)</returns>
-        private static string ConvertLeanSymbolToOKXFormat(string leanSymbol)
-        {
-            // Assume USDT as quote currency (OKX tokenized stocks and most pairs use USDT)
-            const string quoteCurrency = "USDT";
-
-            if (leanSymbol.EndsWith(quoteCurrency))
-            {
-                var baseCurrency = leanSymbol.Substring(0, leanSymbol.Length - quoteCurrency.Length);
-                return $"{baseCurrency}_{quoteCurrency}";
-            }
-
-            // Fallback: try other common quote currencies
-            var quotecurrencies = new[] { "USD", "BTC", "ETH" };
-            foreach (var quote in quotecurrencies)
-            {
-                if (leanSymbol.EndsWith(quote))
-                {
-                    var baseCurrency = leanSymbol.Substring(0, leanSymbol.Length - quote.Length);
-                    return $"{baseCurrency}_{quote}";
-                }
-            }
-
-            // Last resort: assume no underscore needed
-            return leanSymbol;
-        }
-
-        /// <summary>
-        /// Converts OKX format symbol to LEAN format
-        /// Example: BTC_USDT → BTCUSDT
-        /// </summary>
-        /// <param name="okxSymbol">OKX format symbol (e.g., BTC_USDT)</param>
-        /// <returns>LEAN symbol (e.g., BTCUSDT)</returns>
-        private static string ConvertOKXFormatToLeanSymbol(string okxSymbol)
-        {
-            return okxSymbol.Replace("_", "");
-        }
-
-        /// <summary>
-        /// Creates API clients for accessing OKX public ticker endpoints
+        /// Creates an API client for accessing OKX public ticker endpoints
         /// Reads configuration from Config: okx-api-key, okx-api-secret
         /// Uses OKXEnvironment to determine REST API URL based on environment
         /// </summary>
-        /// <returns>Tuple of (SpotClient, FuturesClient)</returns>
-        private static (OKXRestApiClient, OKXRestApiClient) CreateApiClients()
+        /// <returns>OKXRestApiClient instance</returns>
+        private static OKXRestApiClient CreateApiClient()
         {
             var apiKey = Config.Get("okx-api-key", string.Empty);
             var apiSecret = Config.Get("okx-api-secret", string.Empty);
             var passphrase = Config.Get("okx-passphrase", string.Empty);
             var restApiUrl = OKXEnvironment.GetRestApiUrl();
 
-            var spotClient = new OKXRestApiClient(apiKey, apiSecret, passphrase, restApiUrl);
-            var futuresClient = new OKXRestApiClient(apiKey, apiSecret, passphrase, restApiUrl);
-
-            return (spotClient, futuresClient);
+            return new OKXRestApiClient(apiKey, apiSecret, passphrase, restApiUrl);
         }
     }
 }
