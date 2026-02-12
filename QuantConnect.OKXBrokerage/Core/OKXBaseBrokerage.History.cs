@@ -17,6 +17,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using QuantConnect.Brokerages.OKX.Converters;
+using QuantConnect.Brokerages.OKX.Messages;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Logging;
@@ -65,57 +66,57 @@ namespace QuantConnect.Brokerages.OKX
                 var period = request.Resolution.ToTimeSpan();
                 var isQuoteBar = request.DataType == typeof(QuoteBar);
 
-                // Pagination: OKX returns max 100 candles per request
-                // Use 'before' parameter for historical data pagination
-                // 'before' means: get data older than this timestamp
-                long? before = endMs;
-                var candleCount = 0;
+                // OKX returns max 100 candles per request in descending order (newest first).
+                // OKX 'after' (our endTime) returns records older than ts — suitable for backward pagination.
+                // Collect all candles backwards, then reverse for chronological yield.
+                var allCandles = new List<Candle>();
+                long? currentEndTime = endMs;
+                var reachedStart = false;
 
-                while (true)
+                while (!reachedStart)
                 {
-                    var candles = RestApiClient.GetCandles(instId, bar, null, before, 100);
+                    var candles = RestApiClient.GetCandles(instId, bar, endTime: currentEndTime, limit: 100);
 
                     if (candles == null || candles.Count == 0)
                     {
-                        Log.Trace($"{GetType().Name}.GetHistory(): No more candles returned. Total fetched: {candleCount}");
+                        Log.Trace($"{GetType().Name}.GetHistory(): No more candles returned. Total fetched: {allCandles.Count}");
                         break;
                     }
 
-                    // OKX returns candles in descending order (newest first)
-                    // We need to reverse them for chronological processing
-                    candles.Reverse();
-
+                    // OKX returns descending: candles[0]=newest, candles[Count-1]=oldest
                     foreach (var candle in candles)
                     {
-                        // Filter: only return candles within requested time range
                         if (candle.Timestamp < startMs)
                         {
-                            Log.Trace($"{GetType().Name}.GetHistory(): Reached start of requested range. Total candles: {candleCount}");
-                            yield break;
+                            reachedStart = true;
+                            break;
                         }
-
-                        if (candle.Timestamp <= endMs)
-                        {
-                            if (isQuoteBar)
-                            {
-                                yield return candle.ToQuoteBar(request.Symbol, period);
-                            }
-                            else
-                            {
-                                yield return candle.ToTradeBar(request.Symbol, period);
-                            }
-                            candleCount++;
-                        }
+                        allCandles.Add(candle);
                     }
 
-                    // Update pagination marker to the oldest candle timestamp
-                    // (after reversing, the last candle is the oldest)
-                    before = candles[candles.Count - 1].Timestamp;
+                    // Next page: get data older than the oldest candle in this batch
+                    currentEndTime = candles[candles.Count - 1].Timestamp;
 
                     if (candles.Count < 100)
                     {
-                        Log.Trace($"{GetType().Name}.GetHistory(): Received less than 100 candles. Total: {candleCount}");
-                        break;  // No more data available
+                        Log.Trace($"{GetType().Name}.GetHistory(): Received less than 100 candles. Total: {allCandles.Count}");
+                        break;
+                    }
+                }
+
+                // Collected in descending order, reverse for chronological yield
+                allCandles.Reverse();
+                Log.Trace($"{GetType().Name}.GetHistory(): Yielding {allCandles.Count} candles");
+
+                foreach (var candle in allCandles)
+                {
+                    if (isQuoteBar)
+                    {
+                        yield return candle.ToQuoteBar(request.Symbol, period);
+                    }
+                    else
+                    {
+                        yield return candle.ToTradeBar(request.Symbol, period);
                     }
                 }
             }

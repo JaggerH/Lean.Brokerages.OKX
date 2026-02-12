@@ -461,18 +461,23 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// Gets candlestick/K-line data for a specific instrument
         /// https://www.okx.com/docs-v5/en/#rest-api-market-data-get-candlesticks
         /// No authentication required
+        ///
+        /// OKX API parameter mapping (naming is counterintuitive):
+        ///   after  = records EARLIER than ts (paginate backwards)
+        ///   before = records NEWER  than ts (paginate forwards)
+        /// This method uses startTime/endTime so callers don't need to know OKX semantics.
         /// </summary>
         /// <param name="instId">Instrument ID (e.g., BTC-USDT, BTC-USDT-SWAP)</param>
-        /// <param name="bar">Bar size (e.g., "1m", "5m", "1H", "1D"). See ConvertResolutionToBar() for supported values</param>
-        /// <param name="after">Pagination: return data after this timestamp (Unix milliseconds). Earlier data if before is not provided</param>
-        /// <param name="before">Pagination: return data before this timestamp (Unix milliseconds). Later data if after is not provided</param>
+        /// <param name="bar">Bar size (e.g., "1m", "5m", "1H", "1D")</param>
+        /// <param name="startTime">Return data newer than this timestamp (Unix ms). Maps to OKX 'before'</param>
+        /// <param name="endTime">Return data older than this timestamp (Unix ms). Maps to OKX 'after'</param>
         /// <param name="limit">Number of results per request (max 100, default 100)</param>
         /// <returns>List of candles, or empty list if request fails</returns>
         public List<Candle> GetCandles(
             string instId,
             string bar = "1m",
-            long? after = null,
-            long? before = null,
+            long? startTime = null,
+            long? endTime = null,
             int limit = 100)
         {
             try
@@ -481,14 +486,16 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 {
                     $"instId={instId}",
                     $"bar={bar}",
-                    $"limit={Math.Min(limit, 100)}"  // OKX max limit is 100
+                    $"limit={Math.Min(limit, 100)}"
                 };
 
-                if (after.HasValue)
-                    queryParams.Add($"after={after.Value}");
+                // OKX 'before' = records newer than ts = our startTime
+                if (startTime.HasValue)
+                    queryParams.Add($"before={startTime.Value}");
 
-                if (before.HasValue)
-                    queryParams.Add($"before={before.Value}");
+                // OKX 'after' = records earlier than ts = our endTime
+                if (endTime.HasValue)
+                    queryParams.Add($"after={endTime.Value}");
 
                 var queryString = string.Join("&", queryParams);
                 var response = GetPublic<OKXApiResponse<Candle>>(
