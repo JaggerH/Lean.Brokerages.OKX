@@ -271,7 +271,7 @@ namespace QuantConnect.Brokerages.OKX
         {
             // Read account level from configuration (validated in ValidateAccountMode)
             // Values: "1" (Simple), "2" (Single-currency), "3" (Multi-currency), "4" (Portfolio)
-            var accountLevel = Configuration.Config.Get("okx-unified-account-mode", "1");
+            var accountLevel = ResolveAccountLevel(Configuration.Config.Get("okx-unified-account-mode", "spot"));
 
             // Simple mode (acctLv="1"):
             // - Spot (SecurityType.Crypto): tdMode="cash"

@@ -52,8 +52,8 @@ namespace QuantConnect.Brokerages.OKX
             // Optional: Environment (production/demo/testnet), defaults to production
             { "okx-environment", Config.Get("okx-environment", "production")},
 
-            // Optional: Unified account mode (cash/isolated/cross), defaults to cash
-            { "okx-unified-account-mode", Config.Get("okx-unified-account-mode", "cash")},
+            // Optional: Account mode (spot/single_currency/multi_currency/portfolio)
+            { "okx-unified-account-mode", Config.Get("okx-unified-account-mode", "spot")},
 
             // load holdings if available
             { "live-holdings", Config.Get("live-holdings")},

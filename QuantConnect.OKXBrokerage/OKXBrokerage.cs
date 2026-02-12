@@ -201,7 +201,7 @@ namespace QuantConnect.Brokerages.OKX
                 }
 
                 // 1. Validate account level (cannot auto-fix)
-                var configuredLevel = Configuration.Config.Get("okx-unified-account-mode", "1");
+                var configuredLevel = ResolveAccountLevel(Configuration.Config.Get("okx-unified-account-mode", "spot"));
                 var accountLevelDescription = config.AccountLevel switch
                 {
                     "1" => "Simple (Spot only)",

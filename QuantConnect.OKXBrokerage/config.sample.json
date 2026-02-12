@@ -16,14 +16,14 @@
   // Use "demo" or "testnet" for testing with demo funds
   "okx-environment": "production",
 
-  // Optional: Account level (must match your actual OKX account configuration)
-  // Default: "1"
-  // - "1": Simple mode (Spot uses "cash" tdMode, Futures uses "cross" tdMode)
-  // - "2": Single-currency margin mode (All use "cross" tdMode)
-  // - "3": Multi-currency margin mode (All use "cross" tdMode)
-  // - "4": Portfolio margin mode (All use "cross" tdMode)
-  // This value will be validated against actual account configuration on startup
-  "okx-unified-account-mode": "4",
+  // Optional: Account mode (must match your actual OKX account configuration)
+  // Default: "spot"
+  // - "spot": Simple mode (acctLv=1, Spot uses "cash" tdMode, Futures uses "cross")
+  // - "single_currency": Single-currency margin mode (acctLv=2, all use "cross")
+  // - "multi_currency": Multi-currency margin mode (acctLv=3, all use "cross")
+  // - "portfolio": Portfolio margin mode (acctLv=4, all use "cross")
+  // Validated against actual account configuration on startup
+  "okx-unified-account-mode": "portfolio",
 
   // Optional: Live holdings
   // Format: "Symbol,Quantity;Symbol2,Quantity2"

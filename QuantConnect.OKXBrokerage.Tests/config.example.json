@@ -4,5 +4,5 @@
   "okx-api-secret": "YOUR_API_KEY",
   "okx-passphrase": "YOUR_PASSPHRASE",
   "okx-environment": "testnet",
-  "okx-unified-account-mode": "4"
+  "okx-unified-account-mode": "portfolio"
 }
