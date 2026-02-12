@@ -252,9 +252,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             request.AddHeader("OK-ACCESS-PASSPHRASE", _passphrase);
             request.AddHeader("Content-Type", "application/json");
 
-            // Add demo trading header if in demo/testnet environment
-            // OKX uses the same REST URL for live and demo, differentiated by this header
-            if (OKXEnvironment.UseSimulatedTradingHeader())
+            if (OKXEnvironment.IsTestnet)
             {
                 request.AddHeader("x-simulated-trading", "1");
             }
@@ -468,6 +466,11 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             if (!string.IsNullOrEmpty(bodyJson))
             {
                 request.AddParameter("application/json", bodyJson, ParameterType.RequestBody);
+            }
+
+            if (OKXEnvironment.IsTestnet)
+            {
+                request.AddHeader("x-simulated-trading", "1");
             }
 
             // NO SignRequest() call - that's the key difference from ExecuteAuthenticatedRequest

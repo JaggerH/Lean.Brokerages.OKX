@@ -94,46 +94,27 @@ namespace QuantConnect.Brokerages.OKX
         public const string SandboxWebSocketUrl = "ws://127.0.0.1:19999";
 
         // ========================================
-        // Environment Detection
+        // Environment Detection (cached from config)
         // ========================================
 
+        private static readonly string _environment = Config.Get("okx-environment", "live").ToLowerInvariant();
+
         /// <summary>
-        /// Gets whether we're running in sandbox mode (unit tests with mock server)
+        /// Whether we're running in sandbox mode (unit tests with mock server)
         /// Config: okx-environment = "sandbox"
         /// </summary>
-        public static bool IsSandbox
-        {
-            get
-            {
-                var environment = Config.Get("okx-environment", "live").ToLowerInvariant();
-                return environment == "sandbox";
-            }
-        }
+        public static bool IsSandbox => _environment == "sandbox";
 
         /// <summary>
-        /// Gets whether we're running in demo/testnet mode (OKX demo trading)
+        /// Whether we're running in demo/testnet mode (OKX demo trading)
         /// Config: okx-environment = "testnet" or "demo"
         /// </summary>
-        public static bool IsDemoTrading
-        {
-            get
-            {
-                var environment = Config.Get("okx-environment", "live").ToLowerInvariant();
-                return environment == "testnet" || environment == "demo";
-            }
-        }
+        public static bool IsTestnet => _environment == "testnet" || _environment == "demo";
 
         /// <summary>
-        /// Gets whether we're running in live/production mode (real trading)
-        /// Config: okx-environment = "live" or "production"
+        /// Whether we're running in live/production mode (real trading)
         /// </summary>
-        public static bool IsLiveTrading
-        {
-            get
-            {
-                return !IsSandbox && !IsDemoTrading;
-            }
-        }
+        public static bool IsLiveTrading => !IsSandbox && !IsTestnet;
 
         // ========================================
         // URL Getters
@@ -150,14 +131,6 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Gets whether to add x-simulated-trading header (demo trading)
-        /// </summary>
-        public static bool UseSimulatedTradingHeader()
-        {
-            return IsDemoTrading;
-        }
-
-        /// <summary>
         /// Gets the appropriate WebSocket URL for public channel (market data)
         /// </summary>
         public static string GetWebSocketPublicUrl()
@@ -167,7 +140,7 @@ namespace QuantConnect.Brokerages.OKX
                 return Config.Get("okx-websocket-url", SandboxWebSocketUrl);
 
             // Demo trading
-            if (IsDemoTrading)
+            if (IsTestnet)
                 return DemoWebSocketPublicUrl;
 
             // Live trading
@@ -184,7 +157,7 @@ namespace QuantConnect.Brokerages.OKX
                 return Config.Get("okx-websocket-url", SandboxWebSocketUrl);
 
             // Demo trading
-            if (IsDemoTrading)
+            if (IsTestnet)
                 return DemoWebSocketPrivateUrl;
 
             // Live trading
@@ -201,7 +174,7 @@ namespace QuantConnect.Brokerages.OKX
                 return Config.Get("okx-websocket-url", SandboxWebSocketUrl);
 
             // Demo trading
-            if (IsDemoTrading)
+            if (IsTestnet)
                 return DemoWebSocketBusinessUrl;
 
             // Live trading
@@ -214,7 +187,7 @@ namespace QuantConnect.Brokerages.OKX
         public static string GetEnvironmentName()
         {
             if (IsSandbox) return "Sandbox";
-            if (IsDemoTrading) return "Demo";
+            if (IsTestnet) return "Demo";
             return "Live";
         }
     }
