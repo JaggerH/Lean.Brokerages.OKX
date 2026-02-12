@@ -15,7 +15,6 @@
 
 using System;
 using System.Globalization;
-using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using QuantConnect.Brokerages.OKX.Converters;
@@ -351,12 +350,20 @@ namespace QuantConnect.Brokerages.OKX
                 // Deduplicate by tradeId - per OKX docs, for the same tradeId, only process first message
                 if (!string.IsNullOrEmpty(order.TradeId))
                 {
-                    if (_processedTradeIds.TryGetValue(order.TradeId, out bool _))
+                    var now = DateTime.UtcNow;
+                    if (_processedTradeIds.TryGetValue(order.TradeId, out var expiry) && now < expiry)
                     {
                         Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Duplicate tradeId ignored: {order.TradeId}");
                         return;
                     }
-                    _processedTradeIds.Set(order.TradeId, true, TimeSpan.FromMinutes(5));
+                    _processedTradeIds[order.TradeId] = now.AddMinutes(5);
+                    if (_processedTradeIds.Count > 500)
+                    {
+                        foreach (var kv in _processedTradeIds)
+                        {
+                            if (now >= kv.Value) _processedTradeIds.TryRemove(kv.Key, out _);
+                        }
+                    }
                 }
 
                 // Parse client order ID to get LEAN order ID
