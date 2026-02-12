@@ -16,9 +16,12 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using QuantConnect.Configuration;
 using QuantConnect.Data;
+using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Packets;
+using QuantConnect.Util;
 
 namespace QuantConnect.Brokerages.OKX
 {
@@ -113,6 +116,10 @@ namespace QuantConnect.Brokerages.OKX
         /// <param name="job">Job we're processing</param>
         public void SetJob(LiveNodePacket job)
         {
+            _aggregator = Composer.Instance.GetExportedValueByTypeName<IDataAggregator>(
+                Config.Get("data-aggregator", "QuantConnect.Lean.Engine.DataFeeds.AggregationManager"),
+                forceTypeNameOnExisting: false);
+
             SetJobInit(job, _aggregator);
 
             if (!IsConnected)
@@ -170,8 +177,6 @@ namespace QuantConnect.Brokerages.OKX
 
             // Delegate to SubscriptionManager (triggers Subscribe callback synchronously)
             SubscriptionManager.Subscribe(dataConfig);
-
-            Log.Trace($"{GetType().Name}.Subscribe(): Subscribed {dataConfig.Symbol} via SubscriptionManager");
 
             return enumerator;
         }

@@ -137,9 +137,6 @@ namespace QuantConnect.Brokerages.OKX
         {
             var response = jObject.ToObject<WebSocketResponse>();
 
-            // Log all event messages for debugging
-            Log.Trace($"{GetType().Name}.HandleEventMessage(): Received event '{response.Event}', Code: '{response.Code ?? "null"}', Message: '{response.Message ?? "null"}'");
-
             switch (response.Event)
             {
                 case "login":
@@ -242,7 +239,6 @@ namespace QuantConnect.Brokerages.OKX
             var channel = response.Arg?.Channel;
             var instId = response.Arg?.InstrumentId;
             var key = string.IsNullOrEmpty(instId) ? channel : $"{channel}:{instId}";
-            Log.Trace($"{GetType().Name}: Unsubscription confirmed - {key}");
         }
 
         /// <summary>

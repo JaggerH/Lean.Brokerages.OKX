@@ -82,7 +82,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Data aggregator for consolidating ticks
         /// </summary>
-        protected readonly IDataAggregator _aggregator;
+        protected IDataAggregator _aggregator;
 
         /// <summary>
         /// Symbol mapper for converting between LEAN and broker symbols
@@ -266,6 +266,9 @@ namespace QuantConnect.Brokerages.OKX
             // 5. Initialize message handler for REST/WebSocket synchronization (Binance pattern)
             // This prevents race conditions where WebSocket receives fills before REST response sets BrokerId
             _messageHandler = new BrokerageConcurrentMessageHandler<WebSocketMessage>(ProcessPrivateMessage);
+
+            // OKX is USDT-settled; tell BrokerageSetupHandler to auto-set account currency
+            AccountBaseCurrency = "USDT";
 
             // 6. Initialize timers (created once, controlled via Start/Stop - Binance pattern)
             // Send heartbeat every 15 seconds
@@ -549,7 +552,6 @@ namespace QuantConnect.Brokerages.OKX
                 };
                 webSocket.Send(JsonConvert.SerializeObject(tradesSubscribeMessage));
 
-                Log.Trace($"{GetType().Name}.Subscribe(): Subscribed {symbol} to books (400-level) and trades");
                 return true;
             }
             catch (Exception ex)

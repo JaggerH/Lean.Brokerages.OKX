@@ -49,10 +49,6 @@ namespace QuantConnect.Brokerages.OKX
                 yield break;
             }
 
-            Log.Trace($"{GetType().Name}.GetHistory(): Requesting {request.DataType.Name} history for {request.Symbol} " +
-                     $"from {request.StartTimeUtc:yyyy-MM-dd HH:mm:ss} to {request.EndTimeUtc:yyyy-MM-dd HH:mm:ss} " +
-                     $"at {request.Resolution} resolution");
-
             // Convert symbol to OKX format
             var instId = _symbolMapper.GetBrokerageSymbol(request.Symbol);
 
@@ -106,7 +102,6 @@ namespace QuantConnect.Brokerages.OKX
 
                 // Collected in descending order, reverse for chronological yield
                 allCandles.Reverse();
-                Log.Trace($"{GetType().Name}.GetHistory(): Yielding {allCandles.Count} candles");
 
                 foreach (var candle in allCandles)
                 {
