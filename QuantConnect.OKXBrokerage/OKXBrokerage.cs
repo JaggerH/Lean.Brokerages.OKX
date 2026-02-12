@@ -33,6 +33,14 @@ namespace QuantConnect.Brokerages.OKX
     {
 
         /// <summary>
+        /// Parameterless constructor for DataQueueHandler resolution via Composer.
+        /// Actual initialization is deferred to SetJob().
+        /// </summary>
+        public OKXBrokerage() : base()
+        {
+        }
+
+        /// <summary>
         /// Creates a new instance of OKXBrokerage
         /// </summary>
         /// <param name="apiKey">OKX API key</param>
