@@ -380,16 +380,10 @@ namespace QuantConnect.Brokerages.OKX
                     return;
                 }
 
-                // Register brokerage ID mapping if first time seeing this order
-                if (!string.IsNullOrEmpty(order.OrderId) && !_ordersByBrokerId.ContainsKey(order.OrderId))
+                // Add broker order ID to LEAN order if not already present
+                if (!string.IsNullOrEmpty(order.OrderId) && !leanOrder.BrokerId.Contains(order.OrderId))
                 {
-                    _ordersByBrokerId.TryAdd(order.OrderId, leanOrder);
-
-                    // Add to BrokerId list if not already present
-                    if (!leanOrder.BrokerId.Contains(order.OrderId))
-                    {
-                        leanOrder.BrokerId.Add(order.OrderId);
-                    }
+                    leanOrder.BrokerId.Add(order.OrderId);
                 }
 
                 // Convert to OrderEvent using converter

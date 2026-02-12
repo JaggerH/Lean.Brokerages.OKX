@@ -106,11 +106,6 @@ namespace QuantConnect.Brokerages.OKX
         protected virtual RateGate OrderRateLimiter { get; } = new(10, TimeSpan.FromSeconds(1));
 
         /// <summary>
-        /// Fast reverse lookup: OKX Brokerage Order ID -> LEAN Order
-        /// </summary>
-        protected readonly ConcurrentDictionary<string, Order> _ordersByBrokerId = new();
-
-        /// <summary>
         /// Track processed trade IDs to prevent duplicate fill events.
         /// Per OKX docs: for the same tradeId, only process the first push message.
         /// Value is the UTC expiration time. Entries older than 5 minutes are purged when count exceeds 500.
