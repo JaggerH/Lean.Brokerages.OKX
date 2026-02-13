@@ -214,14 +214,8 @@ namespace QuantConnect.Brokerages.OKX
                 key += $" (instId: {instId})";
             }
 
-            // Check if subscription was successful
-            // Success: no code field or code = "0"
-            // Failure: code field present and != "0"
-            if (string.IsNullOrEmpty(response.Code) || response.Code == "0")
-            {
-                Log.Trace($"{GetType().Name}: Subscription confirmed - {key}, connId: {response.ConnectionId}");
-            }
-            else
+            // Log only on subscription failure
+            if (!string.IsNullOrEmpty(response.Code) && response.Code != "0")
             {
                 Log.Error($"{GetType().Name}: Subscription failed - {key}, Code: {response.Code}, Message: {response.Message}");
                 OnMessage(new BrokerageMessageEvent(
