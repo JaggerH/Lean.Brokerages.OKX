@@ -23,6 +23,7 @@ using QuantConnect.Data.Market;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Securities;
+using QuantConnect.Securities.UnifiedMargin;
 
 namespace QuantConnect.Brokerages.OKX
 {
@@ -447,12 +448,9 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                Log.Trace($"{GetType().Name}.HandleAccountUpdate(): Total Equity: {account.TotalEquity}");
-
-                // Trigger account changed event (totalEq is in USD)
-                OnAccountChanged(new AccountEvent(
-                    "USD",
-                    decimal.TryParse(account.TotalEquity ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var totalEq) ? totalEq : 0m));
+                var marginData = account.ToAccountMarginData();
+                // Update BrokerageMarginCache for MultiCurrencyBuyingPowerModel
+                BrokerageMarginCache.Instance.UpdateAccount(marginData);
             }
             catch (Exception ex)
             {
