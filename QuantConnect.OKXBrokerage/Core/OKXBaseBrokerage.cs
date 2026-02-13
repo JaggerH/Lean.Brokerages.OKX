@@ -47,7 +47,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Maximum symbols per WebSocket connection
         /// </summary>
-        protected const int MaximumSymbolsPerConnection = 120;
+        protected const int MaximumSymbolsPerConnection = 15;
 
         /// <summary>
         /// Maps readable account mode names to OKX API acctLv values.
@@ -248,14 +248,15 @@ namespace QuantConnect.Brokerages.OKX
 
             var subscriptionManager = new BrokerageMultiWebSocketSubscriptionManager(
                 publicWssUrl,
-                MaximumSymbolsPerConnection,  // 512 (estimated from OKX 64KB limit)
+                MaximumSymbolsPerConnection,  // 15 symbols × 2 channels = 30 channels (OKX recommends < 30 for books)
                 maximumWebSocketConnections,  // From config, default 0 = unlimited
                 null,                         // symbolWeights (null = no weighting)
                 () => new OKXWebSocketWrapper(null),  // WebSocket factory
                 Subscribe,                    // Subscribe callback
                 Unsubscribe,                  // Unsubscribe callback
                 OnDataMessage,                // Message handler
-                new TimeSpan(23, 45, 0));     // webSocketConnectionDuration (23h 45m, same as Binance)
+                new TimeSpan(23, 45, 0),      // webSocketConnectionDuration (23h 45m, same as Binance)
+                new RateGate(3, TimeSpan.FromSeconds(1)));  // OKX limit: 3 connections/IP/second
 
             SubscriptionManager = subscriptionManager;
 
