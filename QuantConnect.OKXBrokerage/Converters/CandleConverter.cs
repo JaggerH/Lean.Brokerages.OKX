@@ -126,35 +126,5 @@ namespace QuantConnect.Brokerages.OKX.Converters
                 period
             );
         }
-
-        /// <summary>
-        /// Converts an OKX Candle to a LEAN QuoteBar.
-        /// Since OKX candlesticks don't have separate bid/ask data,
-        /// we use the OHLC prices as both bid and ask (mid-price approximation).
-        /// </summary>
-        /// <param name="candle">OKX candle data</param>
-        /// <param name="symbol">LEAN symbol</param>
-        /// <param name="period">Bar period (resolution timespan)</param>
-        /// <returns>LEAN QuoteBar object</returns>
-        public static QuoteBar ToQuoteBar(this Candle candle, Symbol symbol, TimeSpan period)
-        {
-            // Convert Unix milliseconds to DateTime
-            var time = DateTimeOffset.FromUnixTimeMilliseconds(candle.Timestamp).UtcDateTime;
-
-            // Create bid and ask bars using the same OHLC prices
-            // This is a reasonable approximation when we only have trade data
-            var bidBar = new Bar(candle.Open, candle.High, candle.Low, candle.Close);
-            var askBar = new Bar(candle.Open, candle.High, candle.Low, candle.Close);
-
-            return new QuoteBar(
-                time,
-                symbol,
-                bidBar,
-                lastBidSize: 0,  // Not available from candlestick data
-                askBar,
-                lastAskSize: 0,  // Not available from candlestick data
-                period
-            );
-        }
     }
 }
