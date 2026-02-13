@@ -32,6 +32,11 @@ namespace QuantConnect.Brokerages.OKX.RestApi
     /// </summary>
     public class OKXRestApiClient : OKXBaseRestApiClient
     {
+        // Rate limiters for specific OKX endpoints
+        // Based on OKX API documentation: https://www.okx.com/docs-v5/en/#overview-rate-limit
+        private readonly RateGate _candlesRateLimiter;  // /market/candles: 40 requests per 2 seconds
+        private readonly RateGate _tradesRateLimiter;   // /market/trades: 100 requests per 2 seconds
+
         /// <summary>
         /// API prefix for OKX unified account (/api/v5)
         /// </summary>
@@ -47,7 +52,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// Note: Uses OKXEnvironment to determine REST API URL based on okx-environment config
         /// </summary>
         public OKXRestApiClient(string apiKey, string apiSecret, string passphrase)
-            : base(apiKey, apiSecret, passphrase, null, OKXEnvironment.GetRestApiUrl())
+            : this(apiKey, apiSecret, passphrase, OKXEnvironment.GetRestApiUrl())
         {
         }
 
@@ -57,6 +62,8 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         public OKXRestApiClient(string apiKey, string apiSecret, string passphrase, string restApiUrl)
             : base(apiKey, apiSecret, passphrase, null, restApiUrl)
         {
+            _candlesRateLimiter = new RateGate(40, TimeSpan.FromSeconds(2));
+            _tradesRateLimiter = new RateGate(100, TimeSpan.FromSeconds(2));
         }
 
         /// <summary>
@@ -482,6 +489,9 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         {
             try
             {
+                // Apply rate limiting: 40 requests per 2 seconds
+                _candlesRateLimiter?.WaitToProceed();
+
                 var queryParams = new List<string>
                 {
                     $"instId={instId}",
@@ -530,6 +540,9 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         {
             try
             {
+                // Apply rate limiting: 100 requests per 2 seconds
+                _tradesRateLimiter?.WaitToProceed();
+
                 var queryString = $"instId={instId}&limit={Math.Min(limit, 500)}";  // OKX max limit is 500
                 var response = GetPublic<OKXApiResponse<Trade>>(
                     "/market/trades",

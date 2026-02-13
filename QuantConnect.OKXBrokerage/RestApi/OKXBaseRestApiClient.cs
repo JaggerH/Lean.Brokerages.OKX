@@ -48,11 +48,10 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         protected readonly RestClient _restClient;
         protected readonly ISymbolMapper _symbolMapper;
 
-        // Rate limiters for OKX API v5
+        // Rate limiters for OKX API v5 authenticated endpoints
         // Based on OKX API documentation: https://www.okx.com/docs-v5/en/#overview-rate-limit
-        private readonly RateGate _orderRateLimiter;     // Trading endpoints rate limit
-        private readonly RateGate _accountRateLimiter;   // Account endpoints rate limit
-        private readonly RateGate _publicRateLimiter;    // Public data endpoints rate limit
+        private readonly RateGate _orderRateLimiter;     // Trading endpoints (/trade/*): 60 requests per 2 seconds
+        private readonly RateGate _accountRateLimiter;   // Account endpoints (/account/*): 10 requests per 2 seconds
 
         // Time synchronization
         // Set once during initialization in SyncServerTime(), no concurrent writes
@@ -97,13 +96,9 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             _restClient = new RestClient(restApiUrl);
             _symbolMapper = new OKXSymbolMapper(Market.OKX);
 
-            // Initialize rate limiters for OKX API v5
-            // Trading endpoints: 60 requests per 2 seconds (conservative estimate)
+            // Initialize rate limiters for authenticated endpoints
             _orderRateLimiter = new RateGate(60, TimeSpan.FromSeconds(2));
-            // Account endpoints: 10 requests per 2 seconds
             _accountRateLimiter = new RateGate(10, TimeSpan.FromSeconds(2));
-            // Public data endpoints: 20 requests per 2 seconds
-            _publicRateLimiter = new RateGate(20, TimeSpan.FromSeconds(2));
 
             SyncServerTime();
         }
@@ -263,6 +258,22 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         // ========================================
 
         /// <summary>
+        /// Gets the appropriate rate limiter for a given resource path
+        /// </summary>
+        /// <param name="resource">Resource path (e.g., "/trade/order", "/account/balance")</param>
+        /// <returns>Rate limiter for the endpoint, or null if no rate limiting needed</returns>
+        private RateGate GetRateLimiterForResource(string resource)
+        {
+            if (resource.StartsWith("/trade/"))
+                return _orderRateLimiter;
+
+            if (resource.StartsWith("/account/"))
+                return _accountRateLimiter;
+
+            return null;
+        }
+
+        /// <summary>
         /// Executes a REST request with rate limiting and exponential backoff retry logic
         /// </summary>
         protected IRestResponse ExecuteRestRequest(IRestRequest request)
@@ -325,6 +336,10 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             {
                 request.AddParameter("application/json", bodyJson, ParameterType.RequestBody);
             }
+
+            // Apply rate limiting based on endpoint type
+            var rateLimiter = GetRateLimiterForResource(resource);
+            rateLimiter?.WaitToProceed();
 
             SignRequest(request, endpoint, queryString, bodyJson);
             return ExecuteRestRequest(request);
