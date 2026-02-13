@@ -131,10 +131,10 @@ namespace QuantConnect.Brokerages.OKX.Tests
             SetupBrokerage("Spot");
 
             TestOrderBook(
-                symbolValue: "BTCUSDT",
+                symbolValue: "SHIBUSDT",
                 securityType: SecurityType.Crypto,
-                maxUpdates: 20,
-                maxDurationSeconds: 60,
+                maxUpdates: 50,
+                maxDurationSeconds: 90,
                 marketType: "Spot"
             );
         }
@@ -163,10 +163,10 @@ namespace QuantConnect.Brokerages.OKX.Tests
             SetupBrokerage("Futures");
 
             TestOrderBook(
-                symbolValue: "BTCUSDT",
+                symbolValue: "SHIBUSDT",
                 securityType: SecurityType.CryptoFuture,
-                maxUpdates: 20,
-                maxDurationSeconds: 60,
+                maxUpdates: 50,
+                maxDurationSeconds: 120,
                 marketType: "Futures"
             );
         }
@@ -234,13 +234,13 @@ namespace QuantConnect.Brokerages.OKX.Tests
             // Wait for initial orderbook
             var orderBook = WaitForOrderBook(symbol, 30);
             Assert.IsNotNull(orderBook, "OrderBook should be initialized within 30 seconds");
-            Log.Trace($"[OK] Initial OrderBook: Bid={orderBook.BestBidPrice:F2}, Ask={orderBook.BestAskPrice:F2}");
+            Log.Trace($"[OK] Initial OrderBook: Bid={FmtPrice(orderBook.BestBidPrice)}, Ask={FmtPrice(orderBook.BestAskPrice)}");
             Log.Trace("");
 
             // Table header
-            Log.Trace("+--------+-----------+-------------+-------------+------------+-------+");
-            Log.Trace("| Update |   Time    |  Bid Price  |  Ask Price  |   Spread   | Depth |");
-            Log.Trace("+--------+-----------+-------------+-------------+------------+-------+");
+            Log.Trace("+--------+-----------+----------------+----------------+----------------+----------------+-------+");
+            Log.Trace("| Update |   Time    |   Bid Price    |   Bid Size     |   Ask Price    |   Ask Size     | Depth |");
+            Log.Trace("+--------+-----------+----------------+----------------+----------------+----------------+-------+");
 
             // Collect updates
             while (updateCount < maxUpdates && DateTime.UtcNow < timeoutTime)
@@ -254,11 +254,12 @@ namespace QuantConnect.Brokerages.OKX.Tests
                     }
 
                     var bidPrice = ob.Bids.Count > 0 ? ob.Bids[0].Price : 0m;
+                    var bidSize = ob.Bids.Count > 0 ? ob.Bids[0].Size : 0m;
                     var askPrice = ob.Asks.Count > 0 ? ob.Asks[0].Price : 0m;
-                    var spread = askPrice - bidPrice;
+                    var askSize = ob.Asks.Count > 0 ? ob.Asks[0].Size : 0m;
                     var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
 
-                    Log.Trace($"| {updateCount,6} | {elapsed,8:F2}s | {bidPrice,11:F2} | {askPrice,11:F2} | {spread,10:F2} | {ob.Levels,5} |");
+                    Log.Trace($"| {updateCount,6} | {elapsed,8:F2}s | {FmtPrice(bidPrice),14} | {FmtPrice(bidSize),14} | {FmtPrice(askPrice),14} | {FmtPrice(askSize),14} | {ob.Levels,5} |");
 
                     // Basic validation
                     Assert.Greater(bidPrice, 0, "Bid price should be positive");
@@ -269,7 +270,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 Thread.Sleep(100);
             }
 
-            Log.Trace("+--------+-----------+-------------+-------------+------------+-------+");
+            Log.Trace("+--------+-----------+----------------+----------------+----------------+----------------+-------+");
             Log.Trace("");
 
             // Summary
@@ -281,7 +282,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 var lastOb = _receivedOrderbooks.Last();
                 Log.Trace($"===== Summary =====");
                 Log.Trace($"Updates: {updateCount}, Duration: {totalElapsed:F2}s, Rate: {updateCount / totalElapsed:F2}/s");
-                Log.Trace($"Last: Bid={lastOb.Bids[0].Price:F2}, Ask={lastOb.Asks[0].Price:F2}, Levels={lastOb.Levels}");
+                Log.Trace($"Last: Bid={FmtPrice(lastOb.Bids[0].Price)} x {FmtPrice(lastOb.Bids[0].Size)}, Ask={FmtPrice(lastOb.Asks[0].Price)} x {FmtPrice(lastOb.Asks[0].Size)}, Levels={lastOb.Levels}");
             }
 
             // Cleanup
@@ -316,9 +317,9 @@ namespace QuantConnect.Brokerages.OKX.Tests
             Assert.IsNotNull(enumerator, "Enumerator should not be null");
 
             Log.Trace($"[INFO] Subscribed to {symbolValue} with Resolution.Tick + TickType.Quote");
-            Log.Trace("+---------+-----------+-------------+-------------+------------+--------+");
-            Log.Trace("|  Tick # |   Time    |  Bid Price  |  Ask Price  |   Spread   | Value  |");
-            Log.Trace("+---------+-----------+-------------+-------------+------------+--------+");
+            Log.Trace("+---------+-----------+----------------+----------------+---------------+----------------+");
+            Log.Trace("|  Tick # |   Time    |   Bid Price    |   Ask Price    |    Spread     |     Value      |");
+            Log.Trace("+---------+-----------+----------------+----------------+---------------+----------------+");
 
             while (DateTime.UtcNow < timeoutTime && quoteTicksReceived.Count < expectedQuoteTicks)
             {
@@ -338,7 +339,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 var spread = tick.AskPrice - tick.BidPrice;
                 var elapsed = DateTime.UtcNow - startTime;
 
-                Log.Trace($"| {quoteTicksReceived.Count,7} | {elapsed.TotalSeconds,8:F2}s | {tick.BidPrice,11:F2} | {tick.AskPrice,11:F2} | {spread,10:F2} | {tick.Value,6:F2} |");
+                Log.Trace($"| {quoteTicksReceived.Count,7} | {elapsed.TotalSeconds,8:F2}s | {FmtPrice(tick.BidPrice),14} | {FmtPrice(tick.AskPrice),14} | {FmtPrice(spread),13} | {FmtPrice(tick.Value),14} |");
 
                 Assert.Greater(tick.BidPrice, 0, "Bid price should be positive");
                 Assert.Greater(tick.AskPrice, 0, "Ask price should be positive");
@@ -347,7 +348,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 Thread.Sleep(100);
             }
 
-            Log.Trace("+---------+-----------+-------------+-------------+------------+--------+");
+            Log.Trace("+---------+-----------+----------------+----------------+---------------+----------------+");
 
             var totalElapsed = DateTime.UtcNow - startTime;
             Assert.Greater(quoteTicksReceived.Count, 0, "Should have received quote ticks from tickers channel");
@@ -385,9 +386,9 @@ namespace QuantConnect.Brokerages.OKX.Tests
             Assert.IsNotNull(enumerator, "Enumerator should not be null");
 
             Log.Trace($"[INFO] Subscribed to {symbolValue} with Resolution.Tick + TickType.Trade");
-            Log.Trace("+---------+-----------+-------------+-------------+----------+");
-            Log.Trace("|  Tick # |   Time    |    Price    |   Quantity  |  Value   |");
-            Log.Trace("+---------+-----------+-------------+-------------+----------+");
+            Log.Trace("+---------+-----------+----------------+----------------+----------------+");
+            Log.Trace("|  Tick # |   Time    |     Price      |   Quantity     |     Value      |");
+            Log.Trace("+---------+-----------+----------------+----------------+----------------+");
 
             while (DateTime.UtcNow < timeoutTime && tradeTicksReceived.Count < expectedTradeTicks)
             {
@@ -406,7 +407,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 tradeTicksReceived.Add(tick);
                 var elapsed = DateTime.UtcNow - startTime;
 
-                Log.Trace($"| {tradeTicksReceived.Count,7} | {elapsed.TotalSeconds,8:F2}s | {tick.Value,11:F2} | {tick.Quantity,11:F8} | {tick.Value,8:F2} |");
+                Log.Trace($"| {tradeTicksReceived.Count,7} | {elapsed.TotalSeconds,8:F2}s | {FmtPrice(tick.Value),14} | {FmtPrice(tick.Quantity),14} | {FmtPrice(tick.Value),14} |");
 
                 // Validate Trade tick fields
                 Assert.Greater(tick.Value, 0, "Price should be positive");
@@ -417,7 +418,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 Thread.Sleep(100);
             }
 
-            Log.Trace("+---------+-----------+-------------+-------------+----------+");
+            Log.Trace("+---------+-----------+----------------+----------------+----------------+");
 
             var totalElapsed = DateTime.UtcNow - startTime;
             Assert.Greater(tradeTicksReceived.Count, 0, "Should have received trade ticks from trades channel");
@@ -512,8 +513,8 @@ namespace QuantConnect.Brokerages.OKX.Tests
             Log.Trace("+========================================================================+");
             Log.Trace($"|  Market: {marketType}, Symbol: {symbolValue}");
             Log.Trace($"|  Ticks: {ticks.Count}, Duration: {totalElapsed.TotalSeconds:F2}s, Rate: {tickRate:F2}/s");
-            Log.Trace($"|  First: {firstTick.BidPrice:F2} / {firstTick.AskPrice:F2}, Last: {lastTick.BidPrice:F2} / {lastTick.AskPrice:F2}");
-            Log.Trace($"|  Avg Spread: {avgSpread:F2}");
+            Log.Trace($"|  First: {FmtPrice(firstTick.BidPrice)} / {FmtPrice(firstTick.AskPrice)}, Last: {FmtPrice(lastTick.BidPrice)} / {FmtPrice(lastTick.AskPrice)}");
+            Log.Trace($"|  Avg Spread: {FmtPrice(avgSpread)}");
             Log.Trace("+========================================================================+");
         }
 
@@ -530,9 +531,24 @@ namespace QuantConnect.Brokerages.OKX.Tests
             Log.Trace("+========================================================================+");
             Log.Trace($"|  Market: {marketType}, Symbol: {symbolValue}");
             Log.Trace($"|  Ticks: {ticks.Count}, Duration: {totalElapsed.TotalSeconds:F2}s, Rate: {tickRate:F2}/s");
-            Log.Trace($"|  First Price: {firstTick.Value:F2}, Last Price: {lastTick.Value:F2}");
-            Log.Trace($"|  Avg Quantity: {avgQuantity:F8}, Total Volume: {totalVolume:F8}");
+            Log.Trace($"|  First Price: {FmtPrice(firstTick.Value)}, Last Price: {FmtPrice(lastTick.Value)}");
+            Log.Trace($"|  Avg Quantity: {FmtPrice(avgQuantity)}, Total Volume: {FmtPrice(totalVolume)}");
             Log.Trace("+========================================================================+");
+        }
+
+        /// <summary>
+        /// Formats a decimal with appropriate decimal places based on magnitude.
+        /// Small values (like SHIB ~0.00000606) get more decimals; large values (like BTC) get fewer.
+        /// </summary>
+        private static string FmtPrice(decimal value)
+        {
+            if (value == 0m) return "0";
+            var abs = Math.Abs(value);
+            if (abs >= 1m) return value.ToString("F2");
+            if (abs >= 0.01m) return value.ToString("F4");
+            if (abs >= 0.0001m) return value.ToString("F6");
+            if (abs >= 0.000001m) return value.ToString("F8");
+            return value.ToString("F10");
         }
 
         #endregion

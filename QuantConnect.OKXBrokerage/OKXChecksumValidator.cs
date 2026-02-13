@@ -59,9 +59,9 @@ namespace QuantConnect.Brokerages.OKX
                     {
                         checksumBuilder.Append(':');
                     }
-                    checksumBuilder.Append(bids[i].Key.ToString("0.########"));
+                    checksumBuilder.Append(bids[i].Key.ToString());
                     checksumBuilder.Append(':');
-                    checksumBuilder.Append(bids[i].Value.ToString("0.########"));
+                    checksumBuilder.Append(bids[i].Value.ToString());
                 }
 
                 // Add ask if available
@@ -71,9 +71,9 @@ namespace QuantConnect.Brokerages.OKX
                     {
                         checksumBuilder.Append(':');
                     }
-                    checksumBuilder.Append(asks[i].Key.ToString("0.########"));
+                    checksumBuilder.Append(asks[i].Key.ToString());
                     checksumBuilder.Append(':');
-                    checksumBuilder.Append(asks[i].Value.ToString("0.########"));
+                    checksumBuilder.Append(asks[i].Value.ToString());
                 }
             }
 

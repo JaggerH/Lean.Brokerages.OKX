@@ -69,7 +69,7 @@ namespace QuantConnect.Brokerages.OKX
             if (orderBook == null)
             {
                 orderBook = new OKXOrderBook(symbol);
-                orderBook.BestBidAskUpdated += OnBestBidAskUpdated;
+                orderBook.BestBidAskUpdated += EmitBestBidAskUpdated;
                 sync.SetStateSilent(orderBook);
                 _orderBooks[symbol] = orderBook;
                 Log.Trace($"{GetType().Name}.InitializeOrderBookAsync(): State created for {symbol}, waiting for WS snapshot");
@@ -95,20 +95,13 @@ namespace QuantConnect.Brokerages.OKX
             // 1. Snapshot detection: action = "snapshot" or prevSeqId = -1
             if (update.Action == "snapshot" || update.PreviousSequenceId == -1)
             {
-                Log.Trace($"{GetType().Name}.OrderBookReducer(): Snapshot received for {current.Symbol}, seqId={update.SequenceId}, prevSeqId={update.PreviousSequenceId}");
-
                 // Apply full snapshot
                 current.ApplyFullSnapshot(update.Bids, update.Asks);
 
-                // Validate checksum if provided
-                if (update.Checksum.HasValue)
+                // Validate checksum
+                if (!OKXChecksumValidator.ValidateChecksum(current, update.Checksum.Value, out var snapshotChecksum))
                 {
-                    if (!OKXChecksumValidator.ValidateChecksum(current, update.Checksum.Value, out var calculatedChecksum))
-                    {
-                        Log.Error($"{GetType().Name}.OrderBookReducer(): Checksum validation FAILED for {current.Symbol} snapshot! Expected: {update.Checksum.Value}, Calculated: {calculatedChecksum}");
-                        throw new InvalidOperationException($"Checksum validation failed for {current.Symbol} snapshot");
-                    }
-                    Log.Trace($"{GetType().Name}.OrderBookReducer(): Checksum validation passed for {current.Symbol} snapshot: {update.Checksum.Value}");
+                    throw new InvalidOperationException($"Checksum validation failed for {current.Symbol} snapshot: expected={update.Checksum.Value}, calculated={snapshotChecksum}");
                 }
 
                 // Update sequence tracking
@@ -124,58 +117,29 @@ namespace QuantConnect.Brokerages.OKX
             }
 
             // 3. Sequence validation
-            if (update.SequenceId.HasValue && update.PreviousSequenceId.HasValue)
+            var expectedPrevSeqId = current.LastUpdateId;
+            var actualPrevSeqId = update.PreviousSequenceId.Value;
+            var currentSeqId = update.SequenceId.Value;
+
+            // Validate sequence continuity
+            if (actualPrevSeqId != expectedPrevSeqId && expectedPrevSeqId > 0)
             {
-                var expectedPrevSeqId = current.LastUpdateId;
-                var actualPrevSeqId = update.PreviousSequenceId.Value;
-                var currentSeqId = update.SequenceId.Value;
-
-                // Special case: sequence reset during maintenance (prevSeqId > seqId)
-                if (actualPrevSeqId > currentSeqId)
-                {
-                    Log.Trace($"{GetType().Name}.OrderBookReducer(): Sequence reset detected for {current.Symbol}, prevSeqId={actualPrevSeqId} > seqId={currentSeqId}. Continuing with new sequence.");
-                    // Continue processing with new sequence
-                }
-                // Normal case: validate sequence continuity
-                else if (actualPrevSeqId != expectedPrevSeqId && expectedPrevSeqId > 0)
-                {
-                    throw new InvalidOperationException(
-                        $"OrderBook sequence gap detected for {current.Symbol}: expected prevSeqId={expectedPrevSeqId}, got prevSeqId={actualPrevSeqId}, seqId={currentSeqId}");
-                }
-
-                // Apply incremental update
-                current.ApplyIncrementalUpdate(update.Bids, update.Asks);
-
-                // Validate checksum if provided
-                if (update.Checksum.HasValue)
-                {
-                    if (!OKXChecksumValidator.ValidateChecksum(current, update.Checksum.Value, out var calculatedChecksum))
-                    {
-                        throw new InvalidOperationException(
-                            $"Checksum validation failed for {current.Symbol} update: expected={update.Checksum.Value}, calculated={calculatedChecksum}, seqId={currentSeqId}");
-                    }
-                }
-
-                current.LastUpdateId = currentSeqId;
-                current.LastUpdateTime = time;
+                throw new InvalidOperationException(
+                    $"OrderBook sequence gap detected for {current.Symbol}: expected prevSeqId={expectedPrevSeqId}, got prevSeqId={actualPrevSeqId}, seqId={currentSeqId}");
             }
-            else
+
+            // Apply incremental update
+            current.ApplyIncrementalUpdate(update.Bids, update.Asks);
+
+            // Validate checksum
+            if (!OKXChecksumValidator.ValidateChecksum(current, update.Checksum.Value, out var calculatedChecksum))
             {
-                // No sequence IDs present (shouldn't happen for books channel, but handle gracefully)
-                current.ApplyIncrementalUpdate(update.Bids, update.Asks);
-
-                // Validate checksum if provided
-                if (update.Checksum.HasValue)
-                {
-                    if (!OKXChecksumValidator.ValidateChecksum(current, update.Checksum.Value, out var calculatedChecksum))
-                    {
-                        throw new InvalidOperationException(
-                            $"Checksum validation failed for {current.Symbol} update: expected={update.Checksum.Value}, calculated={calculatedChecksum}");
-                    }
-                }
-
-                current.LastUpdateTime = time;
+                throw new InvalidOperationException(
+                    $"Checksum validation failed for {current.Symbol} update: expected={update.Checksum.Value}, calculated={calculatedChecksum}, seqId={currentSeqId}");
             }
+
+            current.LastUpdateId = currentSeqId;
+            current.LastUpdateTime = time;
 
             return current;
         }
@@ -202,7 +166,7 @@ namespace QuantConnect.Brokerages.OKX
         /// Event handler for order book best bid/ask updates
         /// Emits Quote ticks when top of book changes
         /// </summary>
-        protected void OnBestBidAskUpdated(object sender, BestBidAskUpdatedEventArgs e)
+        protected void EmitBestBidAskUpdated(object sender, BestBidAskUpdatedEventArgs e)
         {
             try
             {
@@ -227,7 +191,7 @@ namespace QuantConnect.Brokerages.OKX
             }
             catch (Exception ex)
             {
-                Log.Error($"{GetType().Name}.OnBestBidAskUpdated(): {ex.Message}");
+                Log.Error($"{GetType().Name}.EmitBestBidAskUpdated(): {ex.Message}");
             }
         }
 
