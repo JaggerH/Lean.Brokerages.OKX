@@ -63,48 +63,6 @@ namespace QuantConnect.Brokerages.OKX
             public DateTime UpdateTime { get; set; }
         }
 
-        /// <summary>
-        /// Context for managing Quote tick initialization via REST API
-        /// Tracks whether initial REST ticker data has been fetched and applied
-        /// </summary>
-        protected class QuoteTickContext
-        {
-            /// <summary>
-            /// Lock for thread-safe state updates
-            /// </summary>
-            public readonly object Lock = new object();
-
-            /// <summary>
-            /// LEAN symbol
-            /// </summary>
-            public Symbol Symbol { get; }
-
-            /// <summary>
-            /// OKX currency pair or contract name (e.g., BTC_USDT)
-            /// </summary>
-            public string CurrencyPair { get; }
-
-            /// <summary>
-            /// Whether WebSocket has received any quote data yet
-            /// </summary>
-            public bool HasReceivedWebSocketData { get; set; }
-
-            /// <summary>
-            /// Constructor
-            /// </summary>
-            public QuoteTickContext(Symbol symbol, string currencyPair)
-            {
-                Symbol = symbol;
-                CurrencyPair = currencyPair;
-                HasReceivedWebSocketData = false;
-            }
-        }
-
-        /// <summary>
-        /// Quote tick initialization tracking for each symbol
-        /// </summary>
-        protected readonly ConcurrentDictionary<Symbol, QuoteTickContext> _quoteTickContexts = new();
-
         // ========================================
         // IDataQueueHandler IMPLEMENTATION
         // ========================================

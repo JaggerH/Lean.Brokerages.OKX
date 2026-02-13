@@ -14,7 +14,6 @@
 */
 
 using System;
-using System.Linq;
 using System.Threading.Tasks;
 using QuantConnect.Data.Market;
 using QuantConnect.Logging;
@@ -251,59 +250,5 @@ namespace QuantConnect.Brokerages.OKX
             _ = sync.ReinitializeAsync();
         }
 
-        /// <summary>
-        /// Initializes a Quote tick subscription asynchronously
-        /// Fetches REST ticker data and emits initial quote tick if no WebSocket data arrived yet
-        /// </summary>
-        protected Task InitializeQuoteTickAsync(QuoteTickContext context)
-        {
-            try
-            {
-                // Fetch REST ticker data immediately (0ms delay as per user preference)
-                var tickers = RestApiClient.GetTicker(context.CurrencyPair);
-                var ticker = tickers?.FirstOrDefault();
-                if (ticker == null)
-                {
-                    Log.Error($"{GetType().Name}.InitializeQuoteTickAsync(): Failed to get ticker for {context.Symbol}");
-                    return Task.CompletedTask;
-                }
-
-                // Check if WebSocket data already arrived
-                lock (context.Lock)
-                {
-                    if (context.HasReceivedWebSocketData)
-                    {
-                        Log.Trace($"{GetType().Name}.InitializeQuoteTickAsync(): WebSocket data already received for {context.Symbol}, discarding REST data");
-                        return Task.CompletedTask;
-                    }
-
-                    // WebSocket data hasn't arrived yet, emit REST ticker as initial quote tick
-                    var quoteTick = new Tick
-                    {
-                        Symbol = context.Symbol,
-                        Time = DateTime.UtcNow,
-                        Value = (ticker.HighestBid + ticker.LowestAsk) / 2,
-                        BidPrice = ticker.HighestBid,
-                        AskPrice = ticker.LowestAsk,
-                        BidSize = 0, // Ticker doesn't provide size info
-                        AskSize = 0,
-                        TickType = TickType.Quote,
-                        Exchange = Market.OKX
-                    };
-
-                    lock (_aggregator)
-                    {
-                        _aggregator.Update(quoteTick);
-                    }
-
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.InitializeQuoteTickAsync(): Error for {context.Symbol}: {ex.Message}");
-            }
-
-            return Task.CompletedTask;
-        }
     }
 }
