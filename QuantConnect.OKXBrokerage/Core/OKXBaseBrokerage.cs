@@ -105,6 +105,12 @@ namespace QuantConnect.Brokerages.OKX
         protected virtual RateGate OrderRateLimiter { get; } = new(10, TimeSpan.FromSeconds(1));
 
         /// <summary>
+        /// Rate limiter for WebSocket connections (public + private share the same IP limit).
+        /// OKX limit: 3 connections per IP per second.
+        /// </summary>
+        private readonly RateGate _webSocketConnectionRateLimiter = new(3, TimeSpan.FromSeconds(1));
+
+        /// <summary>
         /// Track processed trade IDs to prevent duplicate fill events.
         /// Per OKX docs: for the same tradeId, only process the first push message.
         /// Value is the UTC expiration time. Entries older than 5 minutes are purged when count exceeds 500.
@@ -256,7 +262,7 @@ namespace QuantConnect.Brokerages.OKX
                 Unsubscribe,                  // Unsubscribe callback
                 OnDataMessage,                // Message handler
                 new TimeSpan(23, 45, 0),      // webSocketConnectionDuration (23h 45m, same as Binance)
-                new RateGate(3, TimeSpan.FromSeconds(1)));  // OKX limit: 3 connections/IP/second
+                _webSocketConnectionRateLimiter);  // shared with private WS: OKX limit 3 connections/IP/second
 
             SubscriptionManager = subscriptionManager;
 
@@ -352,14 +358,13 @@ namespace QuantConnect.Brokerages.OKX
             // Validate unified account mode if configured (optional, override in subclass)
             ValidateAccountMode();
 
-            // Connect to WebSocket (this triggers OnOpen which sends auth request)
-            Log.Trace($"{GetType().Name}.Connect(): Connecting to WebSocket...");
+            // Connect to private WebSocket (this triggers OnOpen which sends auth request)
+            // Rate-limit together with public WS connections — OKX enforces 3 connections/IP/second
+            _webSocketConnectionRateLimiter.WaitToProceed();
             ConnectSync();
 
             // Start periodic reconnection timer (Binance pattern)
             _reconnectTimer.Start();
-
-            Log.Trace($"{GetType().Name}.Connect(): WebSocket connected, authentication in progress...");
         }
 
         /// <summary>

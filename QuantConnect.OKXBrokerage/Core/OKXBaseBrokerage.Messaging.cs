@@ -365,9 +365,6 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                // Log raw OKX order data for debugging
-                Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Raw data - {JsonConvert.SerializeObject(order)}");
-
                 // Deduplicate by tradeId - per OKX docs, for the same tradeId, only process first message
                 if (!string.IsNullOrEmpty(order.TradeId))
                 {

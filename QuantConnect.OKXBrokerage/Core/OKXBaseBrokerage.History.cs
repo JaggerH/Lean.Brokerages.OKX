@@ -159,7 +159,6 @@ namespace QuantConnect.Brokerages.OKX
 
                 if (candles.Count < 100)
                 {
-                    Log.Trace($"{GetType().Name}.GetCandlesInTimeRange(): Received less than 100 candles. Total: {allCandles.Count}");
                     break;
                 }
             }
