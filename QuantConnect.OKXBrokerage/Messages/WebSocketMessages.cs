@@ -70,6 +70,18 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// </summary>
         [JsonProperty("arg", NullValueHandling = NullValueHandling.Ignore)]
         public WebSocketChannel Arg { get; set; }
+
+        /// <summary>
+        /// Channel name (for connection count events)
+        /// </summary>
+        [JsonProperty("channel", NullValueHandling = NullValueHandling.Ignore)]
+        public string Channel { get; set; }
+
+        /// <summary>
+        /// Connection count (for connection count events)
+        /// </summary>
+        [JsonProperty("connCount", NullValueHandling = NullValueHandling.Ignore)]
+        public string ConnCount { get; set; }
     }
 
     /// <summary>

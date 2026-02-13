@@ -155,6 +155,14 @@ namespace QuantConnect.Brokerages.OKX
                     HandleErrorEvent(response);
                     break;
 
+                case "channel-conn-count":
+                    HandleChannelConnCountEvent(response);
+                    break;
+
+                case "channel-conn-count-error":
+                    HandleChannelConnCountErrorEvent(response);
+                    break;
+
                 default:
                     Log.Trace($"{GetType().Name}: Unknown event type: {response.Event}");
                     break;
@@ -245,6 +253,29 @@ namespace QuantConnect.Brokerages.OKX
                 BrokerageMessageType.Warning,
                 response.Code,
                 $"WebSocket error: {response.Message}"));
+        }
+
+        /// <summary>
+        /// Handles channel connection count event
+        /// OKX sends this when a new subscription is made to inform the connection count for that channel.
+        /// This is informational only - no action taken until usage is planned.
+        /// </summary>
+        protected virtual void HandleChannelConnCountEvent(WebSocketResponse response)
+        {
+            // Intentionally empty - connection count tracking not yet implemented
+        }
+
+        /// <summary>
+        /// Handles channel connection count error event
+        /// OKX sends this when the connection limit (30 per channel) is exceeded.
+        /// The subscription will be terminated by the platform.
+        /// </summary>
+        protected virtual void HandleChannelConnCountErrorEvent(WebSocketResponse response)
+        {
+            OnMessage(new BrokerageMessageEvent(
+                BrokerageMessageType.Warning,
+                "CONN_LIMIT",
+                $"Connection limit exceeded for channel {response.Channel}. Maximum {response.ConnCount} connections allowed per channel."));
         }
 
         // ========================================
