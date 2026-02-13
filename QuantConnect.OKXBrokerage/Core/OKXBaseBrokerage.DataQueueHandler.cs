@@ -150,12 +150,8 @@ namespace QuantConnect.Brokerages.OKX
                 return;
             }
 
-            Log.Trace($"{GetType().Name}.Unsubscribe(): {dataConfig.Symbol}");
-
             // Delegate to SubscriptionManager (triggers Unsubscribe callback)
             SubscriptionManager.Unsubscribe(dataConfig);
-
-            Log.Trace($"{GetType().Name}.Unsubscribe(): Unsubscribed {dataConfig.Symbol} via SubscriptionManager");
         }
 
         // ========================================

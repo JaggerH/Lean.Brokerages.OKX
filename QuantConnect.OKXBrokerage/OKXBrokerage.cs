@@ -154,8 +154,6 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                Log.Trace("OKXBrokerage.SubscribePrivateChannels(): Starting private channel subscription...");
-
                 // Subscribe to orders channel for all instrument types
                 // This provides real-time order updates and fill information
                 var ordersChannel = new Messages.WebSocketChannel
@@ -171,11 +169,7 @@ namespace QuantConnect.Brokerages.OKX
                 };
 
                 var message = JsonConvert.SerializeObject(subscribeMessage);
-                Log.Trace($"OKXBrokerage.SubscribePrivateChannels(): Sending subscription message: {message}");
-
                 WebSocket.Send(message);
-
-                Log.Trace("OKXBrokerage.SubscribePrivateChannels(): Subscription message sent for orders channel (instType: ANY)");
             }
             catch (Exception ex)
             {

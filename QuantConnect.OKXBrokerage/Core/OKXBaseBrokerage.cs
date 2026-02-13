@@ -608,8 +608,6 @@ namespace QuantConnect.Brokerages.OKX
                     }
                 };
                 webSocket.Send(JsonConvert.SerializeObject(tradesUnsubscribeMessage));
-
-                Log.Trace($"{GetType().Name}.Unsubscribe(): Unsubscribed {symbol} from books and trades");
                 return true;
             }
             catch (Exception ex)
