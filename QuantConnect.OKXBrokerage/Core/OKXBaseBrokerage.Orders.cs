@@ -166,7 +166,7 @@ namespace QuantConnect.Brokerages.OKX
                 Size = Math.Abs(order.Quantity).ToStringInvariant(),
                 Price = limitPrice.ToStringInvariant(),
                 ClientOrderId = order.Id.ToStringInvariant(),
-                Tag = string.IsNullOrEmpty(order.Tag) ? "" : order.Tag
+                Tag = HashOrderTag(order.Tag)
             };
 
             // 5. Place order via REST API
@@ -236,7 +236,7 @@ namespace QuantConnect.Brokerages.OKX
                 Size = Math.Abs(order.Quantity).ToStringInvariant(),
                 Price = price,
                 ClientOrderId = order.Id.ToStringInvariant(),
-                Tag = string.IsNullOrEmpty(order.Tag) ? "" : order.Tag
+                Tag = HashOrderTag(order.Tag)
                 // Note: tgtCcy removed - not needed for Limit orders, Market Sell, or Futures/Swap
             };
 

@@ -22,6 +22,7 @@ using System.Text;
 using Newtonsoft.Json.Linq;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
+using QuantConnect.TradingPairs;
 
 namespace QuantConnect.Brokerages.OKX
 {
@@ -338,6 +339,17 @@ namespace QuantConnect.Brokerages.OKX
     /// </summary>
     public abstract partial class OKXBaseBrokerage
     {
+        /// <summary>
+        /// Converts a LEAN order tag to an OKX-compatible tag.
+        /// OKX tag field: max 16 characters, alphanumeric only.
+        /// Uses TradingPairManager.ComputeHash to produce a 16-char Base62 hash.
+        /// The hash can be decoded back via TradingPairManager._hashToTag during reconciliation.
+        /// </summary>
+        private static string HashOrderTag(string tag)
+        {
+            if (string.IsNullOrEmpty(tag)) return "";
+            return TradingPairManager.ComputeHash(tag);
+        }
         /// <summary>
         /// Triggers WebSocket reconnection by sending Disconnect event and closing the connection.
         /// LEAN engine will wait 15 minutes for Reconnect before stopping the algorithm.
