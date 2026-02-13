@@ -301,10 +301,6 @@ namespace QuantConnect.Brokerages.OKX
                     HandleAccountChannel(jObject);
                     break;
 
-                case "positions":
-                    HandlePositionsChannel(jObject);
-                    break;
-
                 case "tickers":
                     HandleTickersChannel(jObject);
                     break;
@@ -324,7 +320,7 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         // ========================================
-        // PRIVATE CHANNEL HANDLERS (Orders, Account, Positions)
+        // PRIVATE CHANNEL HANDLERS (Orders, Account)
         // ========================================
 
         /// <summary>
@@ -461,51 +457,6 @@ namespace QuantConnect.Brokerages.OKX
             catch (Exception ex)
             {
                 Log.Error($"{GetType().Name}.HandleAccountUpdate(): Error: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Handles positions channel data push
-        /// Channel: positions
-        /// Data: Array of position updates
-        /// </summary>
-        protected virtual void HandlePositionsChannel(JObject jObject)
-        {
-            try
-            {
-                var message = jObject.ToObject<WebSocketDataMessage<WebSocketPosition>>();
-
-                if (message.Data == null || message.Data.Count == 0)
-                {
-                    return;
-                }
-
-                foreach (var position in message.Data)
-                {
-                    HandlePositionUpdate(position);
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.HandlePositionsChannel(): Error: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Handles individual position update
-        /// </summary>
-        protected virtual void HandlePositionUpdate(WebSocketPosition position)
-        {
-            try
-            {
-                Log.Trace($"{GetType().Name}.HandlePositionUpdate(): {position.InstrumentId} Position: {position.Quantity}, UPL: {position.UnrealizedPnL}");
-
-                // Position updates can trigger AccountChanged event if needed
-                // Implementation depends on specific requirements
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.HandlePositionUpdate(): Error: {ex.Message}");
             }
         }
 

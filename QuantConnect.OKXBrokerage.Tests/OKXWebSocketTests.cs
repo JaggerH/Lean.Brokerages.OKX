@@ -358,41 +358,6 @@ namespace QuantConnect.Brokerages.OKX.Tests
             Assert.Pass($"Orders channel subscribed successfully. Received {orderUpdates.Count} updates.");
         }
 
-        /// <summary>
-        /// Tests positions channel subscription
-        /// </summary>
-        [Test]
-        public void PrivateWebSocket_SubscribePositions_CanReceiveUpdates()
-        {
-            // Arrange
-            var privateUrl = OKXEnvironment.GetWebSocketPrivateUrl();
-            using var client = new OKXWebSocketClient(
-                privateUrl,
-                _apiKey,
-                _apiSecret,
-                _passphrase,
-                isPrivateChannel: true);
-
-            var positionUpdates = new List<WebSocketPosition>();
-            client.PositionReceived += (sender, position) =>
-            {
-                positionUpdates.Add(position);
-                Console.WriteLine($"Position update: {position.InstrumentId}, Pos={position.Quantity}, Side={position.PositionSide}");
-            };
-
-            // Act
-            client.Connect();
-            Thread.Sleep(2000);
-
-            client.Subscribe("positions", null, null);
-            Thread.Sleep(3000);
-
-            // Assert
-            // Note: We may not receive position updates if there are no open positions
-            // This test just verifies the subscription works without errors
-            Assert.Pass($"Positions channel subscribed successfully. Received {positionUpdates.Count} updates.");
-        }
-
         #endregion
 
         #region Integration Tests

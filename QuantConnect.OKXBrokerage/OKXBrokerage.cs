@@ -147,7 +147,7 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Subscribes to private channels (orders, account, positions)
+        /// Subscribes to private channels (orders, account)
         /// Called automatically after successful WebSocket authentication
         /// </summary>
         protected override void SubscribePrivateChannels()

@@ -81,11 +81,6 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
         public event EventHandler<WebSocketAccount> AccountReceived;
 
         /// <summary>
-        /// Event fired when a position update is received
-        /// </summary>
-        public event EventHandler<WebSocketPosition> PositionReceived;
-
-        /// <summary>
         /// Creates a new OKX WebSocket client
         /// </summary>
         /// <param name="websocketUrl">WebSocket URL (public or private channel)</param>
@@ -523,9 +518,6 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
                 case "account":
                     HandleAccountMessage(jObject);
                     break;
-                case "positions":
-                    HandlePositionMessage(jObject);
-                    break;
                 default:
                     Log.Trace($"OKXWebSocketClient: Unknown channel: {channel}");
                     break;
@@ -588,18 +580,6 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
                 foreach (var account in message.Data)
                 {
                     AccountReceived?.Invoke(this, account);
-                }
-            }
-        }
-
-        private void HandlePositionMessage(JObject jObject)
-        {
-            var message = jObject.ToObject<WebSocketDataMessage<WebSocketPosition>>();
-            if (message.Data != null && message.Data.Count > 0)
-            {
-                foreach (var position in message.Data)
-                {
-                    PositionReceived?.Invoke(this, position);
                 }
             }
         }

@@ -55,13 +55,13 @@ namespace QuantConnect.Brokerages.OKX
         // ========================================
 
         /// <summary>
-        /// Live trading - WebSocket private channel (account, orders, positions)
+        /// Live trading - WebSocket private channel (account, orders)
         /// Official: wss://ws.okx.com:8443/ws/v5/private
         /// </summary>
         public const string LiveWebSocketPrivateUrl = "wss://ws.okx.com:8443/ws/v5/private";
 
         /// <summary>
-        /// Demo trading - WebSocket private channel (account, orders, positions)
+        /// Demo trading - WebSocket private channel (account, orders)
         /// Official: wss://wspap.okx.com:8443/ws/v5/private
         /// </summary>
         public const string DemoWebSocketPrivateUrl = "wss://wspap.okx.com:8443/ws/v5/private";
