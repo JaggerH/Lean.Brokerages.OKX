@@ -268,9 +268,6 @@ namespace QuantConnect.Brokerages.OKX.WebSocket
             // Send subscription
             var json = JsonConvert.SerializeObject(subscribeMessage);
             _webSocket.Send(json);
-
-            var key = string.IsNullOrEmpty(instId) ? channel : $"{channel}:{instId}";
-            Log.Trace($"OKXWebSocketClient.Subscribe(): Subscribed to {key}");
         }
 
         /// <summary>

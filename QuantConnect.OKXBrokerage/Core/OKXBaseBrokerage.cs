@@ -51,7 +51,6 @@ namespace QuantConnect.Brokerages.OKX
 
         /// <summary>
         /// Maps readable account mode names to OKX API acctLv values.
-        /// Also accepts raw numeric values ("1"-"4") for backward compatibility.
         /// </summary>
         private static readonly Dictionary<string, string> AccountLevelMap = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -62,7 +61,7 @@ namespace QuantConnect.Brokerages.OKX
         };
 
         /// <summary>
-        /// Resolves a config account mode value (e.g. "portfolio", "spot", or "4") to the OKX API acctLv ("1"-"4").
+        /// Resolves a config account mode value (e.g. "portfolio", "spot") to the OKX API acctLv ("1"-"4").
         /// </summary>
         protected static string ResolveAccountLevel(string configValue)
         {
@@ -72,7 +71,7 @@ namespace QuantConnect.Brokerages.OKX
             }
             throw new ArgumentException(
                 $"Invalid okx-unified-account-mode value: '{configValue}'. " +
-                $"Valid values: spot, single_currency, multi_currency, portfolio (or 1, 2, 3, 4).");
+                $"Valid values: spot, single_currency, multi_currency, portfolio.");
         }
 
         // ========================================

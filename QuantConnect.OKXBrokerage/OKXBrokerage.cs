@@ -278,7 +278,7 @@ namespace QuantConnect.Brokerages.OKX
 
                 Log.Trace("OKXBrokerage.ValidateAccountMode(): Account configuration validated successfully");
             }
-            catch (Exception ex) when (!ex.Message.Contains("mismatch") && !ex.Message.Contains("Failed to retrieve"))
+            catch (Exception ex) when (!ex.Message.Contains("mismatch") && !ex.Message.Contains("Failed to retrieve") && !ex.Message.Contains("Invalid okx-unified-account-mode"))
             {
                 Log.Error($"OKXBrokerage.ValidateAccountMode(): Warning - {ex.Message}");
             }
