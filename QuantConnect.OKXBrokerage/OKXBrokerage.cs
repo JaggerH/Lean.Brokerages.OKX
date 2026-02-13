@@ -162,10 +162,16 @@ namespace QuantConnect.Brokerages.OKX
                     InstrumentType = "ANY"  // Subscribe to all instrument types (SPOT, SWAP, FUTURES, etc.)
                 };
 
+                // Subscribe to account channel for balance/equity updates
+                var accountChannel = new Messages.WebSocketChannel
+                {
+                    Channel = "account"
+                };
+
                 var subscribeMessage = new Messages.WebSocketMessage
                 {
                     Operation = "subscribe",
-                    Arguments = new List<object> { ordersChannel }
+                    Arguments = new List<object> { ordersChannel, accountChannel }
                 };
 
                 var message = JsonConvert.SerializeObject(subscribeMessage);

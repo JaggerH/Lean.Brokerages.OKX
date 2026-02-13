@@ -461,6 +461,108 @@ namespace QuantConnect.Brokerages.OKX.Messages
         public string TotalEquity { get; set; }
 
         /// <summary>
+        /// Isolated margin equity in USD (applicable to Single-currency margin and Multi-currency margin and Portfolio margin)
+        /// </summary>
+        [JsonProperty("isoEq")]
+        public string IsolatedEquity { get; set; }
+
+        /// <summary>
+        /// Adjusted / Effective equity in USD (applicable to Portfolio margin)
+        /// </summary>
+        [JsonProperty("adjEq")]
+        public string AdjustedEquity { get; set; }
+
+        /// <summary>
+        /// Available equity in USD (applicable to Single-currency margin and Multi-currency margin and Portfolio margin)
+        /// </summary>
+        [JsonProperty("availEq")]
+        public string AvailableEquity { get; set; }
+
+        /// <summary>
+        /// Margin frozen for pending orders in USD
+        /// </summary>
+        [JsonProperty("ordFroz")]
+        public string OrderFrozen { get; set; }
+
+        /// <summary>
+        /// Initial margin requirement in USD (applicable to Single-currency margin and Multi-currency margin and Portfolio margin)
+        /// </summary>
+        [JsonProperty("imr")]
+        public string InitialMarginRequirement { get; set; }
+
+        /// <summary>
+        /// Maintenance margin requirement in USD (applicable to Single-currency margin and Multi-currency margin and Portfolio margin)
+        /// </summary>
+        [JsonProperty("mmr")]
+        public string MaintenanceMarginRequirement { get; set; }
+
+        /// <summary>
+        /// Potential borrowing IMR of the account in USD (applicable to Multi-currency margin and Portfolio margin)
+        /// </summary>
+        [JsonProperty("borrowFroz")]
+        public string BorrowFrozen { get; set; }
+
+        /// <summary>
+        /// Margin ratio in USD (applicable to Single-currency margin and Multi-currency margin and Portfolio margin)
+        /// </summary>
+        [JsonProperty("mgnRatio")]
+        public string MarginRatio { get; set; }
+
+        /// <summary>
+        /// Notional value of positions in USD
+        /// </summary>
+        [JsonProperty("notionalUsd")]
+        public string NotionalUsd { get; set; }
+
+        /// <summary>
+        /// Notional value of positions in USD for borrowing
+        /// </summary>
+        [JsonProperty("notionalUsdForBorrow")]
+        public string NotionalUsdForBorrow { get; set; }
+
+        /// <summary>
+        /// Notional value of positions in USD for SWAP
+        /// </summary>
+        [JsonProperty("notionalUsdForSwap")]
+        public string NotionalUsdForSwap { get; set; }
+
+        /// <summary>
+        /// Notional value of positions in USD for FUTURES
+        /// </summary>
+        [JsonProperty("notionalUsdForFutures")]
+        public string NotionalUsdForFutures { get; set; }
+
+        /// <summary>
+        /// Notional value of positions in USD for OPTION
+        /// </summary>
+        [JsonProperty("notionalUsdForOption")]
+        public string NotionalUsdForOption { get; set; }
+
+        /// <summary>
+        /// Unrealized profit and loss of all positions in USD
+        /// </summary>
+        [JsonProperty("upl")]
+        public string UnrealizedPnl { get; set; }
+
+        /// <summary>
+        /// Account delta in USD (applicable to Portfolio margin)
+        /// </summary>
+        [JsonProperty("delta")]
+        public string Delta { get; set; }
+
+        /// <summary>
+        /// Account delta leverage (applicable to Portfolio margin)
+        /// </summary>
+        [JsonProperty("deltaLever")]
+        public string DeltaLever { get; set; }
+
+        /// <summary>
+        /// Delta neutral status: true or false (applicable to Portfolio margin)
+        /// </summary>
+        [JsonProperty("deltaNeutralStatus")]
+        public string DeltaNeutralStatus { get; set; }
+
+        /// <summary>
         /// Currency details
         /// </summary>
         [JsonProperty("details")]
