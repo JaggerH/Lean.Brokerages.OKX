@@ -15,7 +15,6 @@
 
 using System;
 using QuantConnect.Brokerages.OKX.Messages;
-using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Securities;
 
@@ -32,7 +31,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
         /// <param name="okxPosition">OKX position</param>
         /// <param name="symbolMapper">Symbol mapper for converting OKX symbols to LEAN symbols</param>
         /// <returns>LEAN Holding object or null if conversion fails or position is empty</returns>
-        public static Holding ToHolding(this Position okxPosition, ISymbolMapper symbolMapper)
+        public static Holding ToHolding(this Position okxPosition, OKXSymbolMapper symbolMapper)
         {
             if (okxPosition == null || string.IsNullOrEmpty(okxPosition.InstrumentId))
             {
@@ -62,8 +61,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
                 // Convert OKX symbol to LEAN symbol
                 var symbol = symbolMapper.GetLeanSymbol(
                     okxPosition.InstrumentId,
-                    securityType,
-                    Market.OKX);
+                    securityType);
 
                 // Parse average price
                 var averagePrice = ParseHelper.ParseDecimal(okxPosition.AveragePrice);

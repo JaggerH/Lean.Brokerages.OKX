@@ -506,8 +506,7 @@ namespace QuantConnect.Brokerages.OKX
             try
             {
                 // Get LEAN symbol
-                var securityType = GetSecurityType(ticker.InstrumentId);
-                var symbol = _symbolMapper.GetLeanSymbol(ticker.InstrumentId, securityType, Market.OKX);
+                var symbol = _symbolMapper.GetLeanSymbol(ticker.InstrumentId);
 
                 // Parse prices and sizes
                 if (!decimal.TryParse(ticker.Last, NumberStyles.Any, CultureInfo.InvariantCulture, out var lastPrice))
@@ -585,8 +584,7 @@ namespace QuantConnect.Brokerages.OKX
             try
             {
                 // Get LEAN symbol
-                var securityType = GetSecurityType(trade.InstrumentId);
-                var symbol = _symbolMapper.GetLeanSymbol(trade.InstrumentId, securityType, Market.OKX);
+                var symbol = _symbolMapper.GetLeanSymbol(trade.InstrumentId);
 
                 // Parse price and size
                 if (!decimal.TryParse(trade.Price, NumberStyles.Any, CultureInfo.InvariantCulture, out var price))

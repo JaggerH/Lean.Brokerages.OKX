@@ -86,7 +86,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Symbol mapper for converting between LEAN and broker symbols
         /// </summary>
-        protected readonly ISymbolMapper _symbolMapper;
+        protected readonly OKXSymbolMapper _symbolMapper;
 
         /// <summary>
         /// Algorithm instance

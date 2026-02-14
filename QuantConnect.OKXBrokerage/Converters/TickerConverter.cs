@@ -18,7 +18,6 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using QuantConnect.Brokerages.OKX.Messages;
 using QuantConnect.Data.Market;
-using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Securities;
 
@@ -109,7 +108,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
         /// <returns>LEAN Quote Tick object</returns>
         public static Tick ToQuoteTick(
             this Ticker ticker,
-            ISymbolMapper symbolMapper,
+            OKXSymbolMapper symbolMapper,
             SecurityType securityType)
         {
             // CurrencyPair is guaranteed non-null by TickerConverter validation
@@ -119,8 +118,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
             // Convert to LEAN symbol
             var symbol = symbolMapper.GetLeanSymbol(
                 ticker.CurrencyPair,
-                securityType,
-                Market.OKX);
+                securityType);
 
             // Create quote tick with bid/ask prices
             return new Tick

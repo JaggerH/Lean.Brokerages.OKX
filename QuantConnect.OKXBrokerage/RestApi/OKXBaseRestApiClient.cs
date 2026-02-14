@@ -46,7 +46,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         protected readonly IAlgorithm _algorithm;
         protected readonly string _restApiUrl;
         protected readonly RestClient _restClient;
-        protected readonly ISymbolMapper _symbolMapper;
+        protected readonly OKXSymbolMapper _symbolMapper;
 
         // Rate limiters for OKX API v5 authenticated endpoints
         // Based on OKX API documentation: https://www.okx.com/docs-v5/en/#overview-rate-limit

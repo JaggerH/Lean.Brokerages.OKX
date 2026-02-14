@@ -37,7 +37,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
         /// <param name="okxOrder">OKX order</param>
         /// <param name="symbolMapper">Symbol mapper for converting OKX symbols to LEAN symbols</param>
         /// <returns>LEAN Order object or null if conversion fails</returns>
-        public static LeanOrder ToLeanOrder(this OKXOrder okxOrder, ISymbolMapper symbolMapper)
+        public static LeanOrder ToLeanOrder(this OKXOrder okxOrder, OKXSymbolMapper symbolMapper)
         {
             if (okxOrder == null || string.IsNullOrEmpty(okxOrder.InstrumentId))
             {
@@ -53,8 +53,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
                 // Convert OKX symbol to LEAN symbol
                 var symbol = symbolMapper.GetLeanSymbol(
                     okxOrder.InstrumentId,
-                    securityType,
-                    Market.OKX);
+                    securityType);
 
                 // Parse numeric fields
                 var quantity = ParseHelper.ParseDecimal(okxOrder.Size);
@@ -341,7 +340,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
         /// <param name="fill">OKX fill record</param>
         /// <param name="symbolMapper">Symbol mapper for converting OKX symbols to LEAN symbols</param>
         /// <returns>LEAN ExecutionRecord</returns>
-        public static ExecutionRecord ToExecutionRecord(this Fill fill, ISymbolMapper symbolMapper)
+        public static ExecutionRecord ToExecutionRecord(this Fill fill, OKXSymbolMapper symbolMapper)
         {
             // Determine SecurityType from instrument type
             var securityType = fill.InstrumentType?.ToUpperInvariant() switch
@@ -352,7 +351,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
                 _ => SecurityType.Crypto
             };
 
-            var symbol = symbolMapper.GetLeanSymbol(fill.InstrumentId, securityType, Market.OKX);
+            var symbol = symbolMapper.GetLeanSymbol(fill.InstrumentId, securityType);
 
             // Parse quantity (signed: buy=positive, sell=negative)
             var size = ParseHelper.ParseDecimal(fill.FillSize);

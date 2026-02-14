@@ -40,7 +40,7 @@ namespace QuantConnect.Brokerages.OKX
             // Initialize order book synchronizer
             // Uses BrokerageMultiStateSynchronizer for automatic message routing and gap recovery
             _orderBookSync = new BrokerageMultiStateSynchronizer<Symbol, OKXOrderBook, Messages.WebSocketOrderBook>(
-                getKey: msg => _symbolMapper.GetLeanSymbol(msg.InstrumentId, GetSecurityType(msg.InstrumentId), Market.OKX),
+                getKey: msg => _symbolMapper.GetLeanSymbol(msg.InstrumentId),
                 reducer: OrderBookReducer,
                 capacity: 10000,
                 initializer: InitializeOrderBookAsync
@@ -72,7 +72,6 @@ namespace QuantConnect.Brokerages.OKX
                 orderBook.BestBidAskUpdated += EmitBestBidAskUpdated;
                 sync.SetStateSilent(orderBook);
                 _orderBooks[symbol] = orderBook;
-                Log.Trace($"{GetType().Name}.InitializeOrderBookAsync(): State created for {symbol}, waiting for WS snapshot");
             }
         }
 

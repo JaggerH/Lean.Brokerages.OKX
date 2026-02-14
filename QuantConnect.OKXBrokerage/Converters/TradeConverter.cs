@@ -16,7 +16,6 @@
 using System;
 using QuantConnect.Brokerages.OKX.Messages;
 using QuantConnect.Data.Market;
-using QuantConnect.Interfaces;
 using QuantConnect.Securities;
 
 namespace QuantConnect.Brokerages.OKX.Converters
@@ -36,14 +35,13 @@ namespace QuantConnect.Brokerages.OKX.Converters
         /// <returns>LEAN Trade Tick object</returns>
         public static Tick ToTick(
             this Trade trade,
-            ISymbolMapper symbolMapper,
+            OKXSymbolMapper symbolMapper,
             SecurityType securityType)
         {
             // Convert to LEAN symbol
             var symbol = symbolMapper.GetLeanSymbol(
                 trade.InstrumentId,
-                securityType,
-                Market.OKX);
+                securityType);
 
             // Convert Unix milliseconds to DateTime
             var time = DateTimeOffset.FromUnixTimeMilliseconds(trade.Timestamp).UtcDateTime;

@@ -38,7 +38,7 @@ namespace QuantConnect.Brokerages.OKX
         protected virtual void CreatePriceLimitSynchronizer()
         {
             _priceLimitSync = new BrokerageMultiStateSynchronizer<Symbol, PriceLimit, PriceLimit>(
-                getKey: msg => _symbolMapper.GetLeanSymbol(msg.InstrumentId, GetSecurityType(msg.InstrumentId), Market.OKX),
+                getKey: msg => _symbolMapper.GetLeanSymbol(msg.InstrumentId),
                 reducer: (current, msg) =>
                     current == null || ParseHelper.ParseLong(msg.Timestamp) >= ParseHelper.ParseLong(current.Timestamp)
                         ? msg : current,

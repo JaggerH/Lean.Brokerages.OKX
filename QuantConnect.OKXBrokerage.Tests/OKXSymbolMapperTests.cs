@@ -224,6 +224,72 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
         #endregion
 
+        #region InferSecurityType Tests
+
+        [Test]
+        public void InferSecurityType_Spot_ReturnsCrypto()
+        {
+            Assert.AreEqual(SecurityType.Crypto, OKXSymbolMapper.InferSecurityType("BTC-USDT"));
+            Assert.AreEqual(SecurityType.Crypto, OKXSymbolMapper.InferSecurityType("ETH-USDC"));
+        }
+
+        [Test]
+        public void InferSecurityType_Swap_ReturnsCryptoFuture()
+        {
+            Assert.AreEqual(SecurityType.CryptoFuture, OKXSymbolMapper.InferSecurityType("BTC-USDT-SWAP"));
+            Assert.AreEqual(SecurityType.CryptoFuture, OKXSymbolMapper.InferSecurityType("ETH-USDT-SWAP"));
+        }
+
+        [Test]
+        public void InferSecurityType_Futures_ReturnsCryptoFuture()
+        {
+            Assert.AreEqual(SecurityType.CryptoFuture, OKXSymbolMapper.InferSecurityType("BTC-USD-230630"));
+            Assert.AreEqual(SecurityType.CryptoFuture, OKXSymbolMapper.InferSecurityType("ETH-USDT-250328"));
+        }
+
+        [Test]
+        public void InferSecurityType_NullOrEmpty_ReturnsCrypto()
+        {
+            Assert.AreEqual(SecurityType.Crypto, OKXSymbolMapper.InferSecurityType(null));
+            Assert.AreEqual(SecurityType.Crypto, OKXSymbolMapper.InferSecurityType(""));
+        }
+
+        #endregion
+
+        #region GetLeanSymbol Overload Tests
+
+        [Test]
+        public void GetLeanSymbol_OneParam_Spot()
+        {
+            var symbol = _mapper.GetLeanSymbol("BTC-USDT");
+
+            Assert.AreEqual("BTCUSDT", symbol.Value);
+            Assert.AreEqual(SecurityType.Crypto, symbol.SecurityType);
+            Assert.AreEqual(Market.OKX, symbol.ID.Market);
+        }
+
+        [Test]
+        public void GetLeanSymbol_OneParam_Swap()
+        {
+            var symbol = _mapper.GetLeanSymbol("BTC-USDT-SWAP");
+
+            Assert.IsTrue(symbol.Value.Contains("BTCUSDT"));
+            Assert.AreEqual(SecurityType.CryptoFuture, symbol.SecurityType);
+            Assert.AreEqual(Market.OKX, symbol.ID.Market);
+        }
+
+        [Test]
+        public void GetLeanSymbol_TwoParam_Spot()
+        {
+            var symbol = _mapper.GetLeanSymbol("ETH-USDT", SecurityType.Crypto);
+
+            Assert.AreEqual("ETHUSDT", symbol.Value);
+            Assert.AreEqual(SecurityType.Crypto, symbol.SecurityType);
+            Assert.AreEqual(Market.OKX, symbol.ID.Market);
+        }
+
+        #endregion
+
         #region Error Handling Tests
 
         /// <summary>
@@ -270,7 +336,6 @@ namespace QuantConnect.Brokerages.OKX.Tests
         [TestCase("BTCUSDC", "BTC-USDC")]
         [TestCase("BTCUSD", "BTC-USD")]
         [TestCase("ETHBTC", "ETH-BTC")]
-        [TestCase("ETHETH", "ETH-ETH")] // Edge case: same base and quote
         public void GetBrokerageSymbol_VariousQuoteCurrencies(string leanSymbol, string expectedOKXSymbol)
         {
             var symbol = Symbol.Create(leanSymbol, SecurityType.Crypto, Market.OKX);

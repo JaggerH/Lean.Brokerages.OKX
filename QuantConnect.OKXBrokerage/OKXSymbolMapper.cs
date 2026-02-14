@@ -25,6 +25,7 @@ namespace QuantConnect.Brokerages.OKX
     public class OKXSymbolMapper : ISymbolMapper
     {
         private readonly SymbolPropertiesDatabaseSymbolMapper _baseMapper;
+        private readonly string _market;
 
         /// <summary>
         /// Creates a new instance of the <see cref="OKXSymbolMapper"/> class
@@ -32,8 +33,41 @@ namespace QuantConnect.Brokerages.OKX
         /// <param name="market">The Lean market (should be Market.OKX)</param>
         public OKXSymbolMapper(string market)
         {
+            _market = market;
             _baseMapper = new SymbolPropertiesDatabaseSymbolMapper(market);
         }
+
+        /// <summary>
+        /// Infers the <see cref="SecurityType"/> from an OKX instrument ID.
+        /// Spot: "BTC-USDT" (2 parts). Swap/Futures: "BTC-USDT-SWAP", "BTC-USD-230630" (3+ parts).
+        /// </summary>
+        public static SecurityType InferSecurityType(string instId)
+        {
+            if (string.IsNullOrEmpty(instId))
+            {
+                return SecurityType.Crypto;
+            }
+
+            if (instId.Contains("-SWAP") || instId.Contains("-FUTURES") ||
+                (instId.Split('-').Length == 3 && !instId.EndsWith("-SWAP")))
+            {
+                return SecurityType.CryptoFuture;
+            }
+
+            return SecurityType.Crypto;
+        }
+
+        /// <summary>
+        /// Converts an OKX instrument ID to a Lean symbol, using the stored market.
+        /// </summary>
+        public Symbol GetLeanSymbol(string brokerageSymbol, SecurityType securityType)
+            => GetLeanSymbol(brokerageSymbol, securityType, _market);
+
+        /// <summary>
+        /// Converts an OKX instrument ID to a Lean symbol, inferring both security type and market.
+        /// </summary>
+        public Symbol GetLeanSymbol(string brokerageSymbol)
+            => GetLeanSymbol(brokerageSymbol, InferSecurityType(brokerageSymbol), _market);
 
         /// <summary>
         /// Converts a Lean symbol instance to an OKX brokerage symbol
