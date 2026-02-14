@@ -485,23 +485,21 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 Tag = "LEAN-TEST"
             };
 
-            // Act
-            var result = restClient.PlaceOrder(request);
+            // Act - throws on failure
+            var response = restClient.PlaceOrder(request);
 
             // Assert
-            Assert.IsTrue(result.IsSuccess, "Response should be successful");
-            Assert.IsNotNull(result.Data, "Data should not be null");
-            Assert.IsNotEmpty(result.Data.OrderId, "OrderId should be populated");
-            Assert.AreEqual("0", result.Data.StatusCode, "Status code should be 0 (success)");
+            Assert.IsNotEmpty(response.OrderId, "OrderId should be populated");
+            Assert.AreEqual("0", response.StatusCode, "Status code should be 0 (success)");
 
-            Console.WriteLine($"RestApi PlaceOrder succeeded: OrderId={result.Data.OrderId}");
+            Console.WriteLine($"RestApi PlaceOrder succeeded: OrderId={response.OrderId}");
 
             // Cleanup - Cancel the order
             Thread.Sleep(500);
             var cancelRequest = new Messages.CancelOrderRequest
             {
                 InstrumentId = "BTC-USDT",
-                OrderId = result.Data.OrderId
+                OrderId = response.OrderId
             };
             restClient.CancelOrder(cancelRequest);
         }
@@ -526,34 +524,31 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 Tag = "LEAN-TEST"
             };
 
-            var placeResult = restClient.PlaceOrder(placeRequest);
-            Assert.IsTrue(placeResult.IsSuccess, "Place order should succeed");
+            var placeResponse = restClient.PlaceOrder(placeRequest);
             Thread.Sleep(1000);
 
             // Act - Amend order
             var amendRequest = new Messages.AmendOrderRequest
             {
                 InstrumentId = "BTC-USDT",
-                OrderId = placeResult.Data.OrderId,
+                OrderId = placeResponse.OrderId,
                 NewPrice = "11000",
                 NewSize = "0.002"
             };
 
-            var amendResult = restClient.AmendOrder(amendRequest);
+            var amendResponse = restClient.AmendOrder(amendRequest);
 
             // Assert
-            Assert.IsTrue(amendResult.IsSuccess, "Amend should be successful");
-            Assert.IsNotNull(amendResult.Data, "Amend data should not be null");
-            Assert.AreEqual("0", amendResult.Data.StatusCode, "Amend should succeed");
+            Assert.AreEqual("0", amendResponse.StatusCode, "Amend should succeed");
 
-            Console.WriteLine($"RestApi AmendOrder succeeded: OrderId={amendResult.Data.OrderId}");
+            Console.WriteLine($"RestApi AmendOrder succeeded: OrderId={amendResponse.OrderId}");
 
             // Cleanup
             Thread.Sleep(500);
             var cancelRequest = new Messages.CancelOrderRequest
             {
                 InstrumentId = "BTC-USDT",
-                OrderId = placeResult.Data.OrderId
+                OrderId = placeResponse.OrderId
             };
             restClient.CancelOrder(cancelRequest);
         }
@@ -578,25 +573,22 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 Tag = "LEAN-TEST"
             };
 
-            var placeResult = restClient.PlaceOrder(placeRequest);
-            Assert.IsTrue(placeResult.IsSuccess, "Place order should succeed");
+            var placeResponse = restClient.PlaceOrder(placeRequest);
             Thread.Sleep(1000);
 
             // Act - Cancel order
             var cancelRequest = new Messages.CancelOrderRequest
             {
                 InstrumentId = "BTC-USDT",
-                OrderId = placeResult.Data.OrderId
+                OrderId = placeResponse.OrderId
             };
 
-            var cancelResult = restClient.CancelOrder(cancelRequest);
+            var cancelResponse = restClient.CancelOrder(cancelRequest);
 
             // Assert
-            Assert.IsTrue(cancelResult.IsSuccess, "Cancel should be successful");
-            Assert.IsNotNull(cancelResult.Data, "Cancel data should not be null");
-            Assert.AreEqual("0", cancelResult.Data.StatusCode, "Cancel should succeed");
+            Assert.AreEqual("0", cancelResponse.StatusCode, "Cancel should succeed");
 
-            Console.WriteLine($"RestApi CancelOrder succeeded: OrderId={cancelResult.Data.OrderId}");
+            Console.WriteLine($"RestApi CancelOrder succeeded: OrderId={cancelResponse.OrderId}");
         }
 
         #endregion

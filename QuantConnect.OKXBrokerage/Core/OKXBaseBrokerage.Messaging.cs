@@ -179,8 +179,6 @@ namespace QuantConnect.Brokerages.OKX
             // OKX login failure: code != "0"
             if (string.IsNullOrEmpty(response.Code) || response.Code == "0")
             {
-                Log.Trace($"{GetType().Name}: Login successful (connId: {response.ConnectionId})");
-
                 // Subscribe to private channels after successful login
                 try
                 {
@@ -366,46 +364,34 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
+                // --- Filter: only process fill events that belong to this session ---
+                // 1. State changes (no tradeId) are already handled by REST responses
+                // 2. Non-LEAN orders (clOrdId not a positive integer) are not ours
+                // 3. Orders not in cache are from previous sessions (LEAN reuses IDs across sessions)
+                if (string.IsNullOrEmpty(order.TradeId)
+                    || !int.TryParse(order.ClientOrderId ?? "", out var orderId)
+                    || orderId <= 0
+                    || !CachedOrderIDs.TryGetValue(orderId, out var leanOrder))
+                {
+                    return;
+                }
+
                 // Deduplicate by tradeId - per OKX docs, for the same tradeId, only process first message
-                if (!string.IsNullOrEmpty(order.TradeId))
+                var now = DateTime.UtcNow;
+                if (_processedTradeIds.TryGetValue(order.TradeId, out var expiry) && now < expiry)
                 {
-                    var now = DateTime.UtcNow;
-                    if (_processedTradeIds.TryGetValue(order.TradeId, out var expiry) && now < expiry)
+                    return;
+                }
+                _processedTradeIds[order.TradeId] = now.AddMinutes(5);
+                if (_processedTradeIds.Count > 500)
+                {
+                    foreach (var kv in _processedTradeIds)
                     {
-                        Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Duplicate tradeId ignored: {order.TradeId}");
-                        return;
-                    }
-                    _processedTradeIds[order.TradeId] = now.AddMinutes(5);
-                    if (_processedTradeIds.Count > 500)
-                    {
-                        foreach (var kv in _processedTradeIds)
-                        {
-                            if (now >= kv.Value) _processedTradeIds.TryRemove(kv.Key, out _);
-                        }
+                        if (now >= kv.Value) _processedTradeIds.TryRemove(kv.Key, out _);
                     }
                 }
 
-                // Parse client order ID to get LEAN order ID
-                if (!int.TryParse(order.ClientOrderId ?? "0", out var orderId))
-                {
-                    Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Cannot parse client order ID: {order.ClientOrderId}");
-                    return;
-                }
-
-                // Find LEAN order
-                if (!CachedOrderIDs.TryGetValue(orderId, out var leanOrder))
-                {
-                    Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Order not found in cache: {orderId}");
-                    return;
-                }
-
-                // Add broker order ID to LEAN order if not already present
-                if (!string.IsNullOrEmpty(order.OrderId) && !leanOrder.BrokerId.Contains(order.OrderId))
-                {
-                    leanOrder.BrokerId.Add(order.OrderId);
-                }
-
-                // Convert to OrderEvent using converter
+                // Convert fill to OrderEvent
                 var orderEvent = order.ToOrderEvent(leanOrder);
                 if (orderEvent != null)
                 {

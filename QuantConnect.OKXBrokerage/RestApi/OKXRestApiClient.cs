@@ -675,65 +675,30 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// Requires authentication
         /// </summary>
         /// <param name="request">Order request</param>
-        /// <returns>Order result containing success status and error details</returns>
-        public OrderResult<PlaceOrderResponse> PlaceOrder(PlaceOrderRequest request)
+        /// <returns>Place order response on success</returns>
+        /// <exception cref="InvalidOperationException">Thrown on API error or order rejection</exception>
+        public PlaceOrderResponse PlaceOrder(PlaceOrderRequest request)
         {
-            try
+            var response = Post<OKXApiResponse<PlaceOrderResponse>>(
+                "/trade/order",
+                request,
+                defaultValue: null);
+
+            if (response?.Data == null || response.Data.Count == 0)
             {
-                var response = Post<OKXApiResponse<PlaceOrderResponse>>(
-                    "/trade/order",
-                    request,
-                    defaultValue: null);
-
-                // HTTP-level error (network failure, API gateway error, malformed request)
-                // Note: When code="1", data may still exist with sCode/sMsg details
-                if (response == null || response.Data == null || response.Data.Count == 0)
-                {
-                    Log.Error($"OKXRestApiClient.PlaceOrder(): Failed - code: {response?.Code}, msg: {response?.Message}");
-                    return new OrderResult<PlaceOrderResponse>
-                    {
-                        IsSuccess = false,
-                        HttpCode = response?.Code ?? "NETWORK_ERROR",
-                        HttpMessage = response?.Message ?? "Failed to connect to OKX API"
-                    };
-                }
-
-                var orderResponse = response.Data[0];
-
-                // Order-level error (sCode != "0") - order rejected by trading engine
-                if (orderResponse.StatusCode != "0")
-                {
-                    Log.Error($"OKXRestApiClient.PlaceOrder(): Rejected - sCode: {orderResponse.StatusCode}, sMsg: {orderResponse.StatusMessage}");
-                    return new OrderResult<PlaceOrderResponse>
-                    {
-                        IsSuccess = false,
-                        Data = orderResponse,  // Still return data (contains error codes)
-                        HttpCode = response.Code,
-                        HttpMessage = response.Message,
-                        OrderStatusCode = orderResponse.StatusCode,
-                        OrderStatusMessage = orderResponse.StatusMessage
-                    };
-                }
-
-                // Success
-                return new OrderResult<PlaceOrderResponse>
-                {
-                    IsSuccess = true,
-                    Data = orderResponse,
-                    HttpCode = response.Code,
-                    HttpMessage = response.Message
-                };
+                throw new InvalidOperationException(
+                    $"PlaceOrder API error - code: {response?.Code}, msg: {response?.Message}");
             }
-            catch (Exception ex)
+
+            var orderResponse = response.Data[0];
+
+            if (orderResponse.StatusCode != "0")
             {
-                Log.Error($"OKXRestApiClient.PlaceOrder(): Exception: {ex.Message}");
-                return new OrderResult<PlaceOrderResponse>
-                {
-                    IsSuccess = false,
-                    HttpCode = "EXCEPTION",
-                    HttpMessage = ex.Message
-                };
+                throw new InvalidOperationException(
+                    $"PlaceOrder rejected - sCode: {orderResponse.StatusCode}, sMsg: {orderResponse.StatusMessage}");
             }
+
+            return orderResponse;
         }
 
         /// <summary>
@@ -742,65 +707,30 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// Requires authentication
         /// </summary>
         /// <param name="request">Amend order request</param>
-        /// <returns>Order result containing success status and error details</returns>
-        public OrderResult<AmendOrderResponse> AmendOrder(AmendOrderRequest request)
+        /// <returns>Amend order response on success</returns>
+        /// <exception cref="InvalidOperationException">Thrown on API error or order rejection</exception>
+        public AmendOrderResponse AmendOrder(AmendOrderRequest request)
         {
-            try
+            var response = Post<OKXApiResponse<AmendOrderResponse>>(
+                "/trade/amend-order",
+                request,
+                defaultValue: null);
+
+            if (response?.Data == null || response.Data.Count == 0)
             {
-                var response = Post<OKXApiResponse<AmendOrderResponse>>(
-                    "/trade/amend-order",
-                    request,
-                    defaultValue: null);
-
-                // HTTP-level error
-                // Note: When code="1", data may still exist with sCode/sMsg details
-                if (response == null || response.Data == null || response.Data.Count == 0)
-                {
-                    Log.Error($"OKXRestApiClient.AmendOrder(): Failed - code: {response?.Code}, msg: {response?.Message}");
-                    return new OrderResult<AmendOrderResponse>
-                    {
-                        IsSuccess = false,
-                        HttpCode = response?.Code ?? "NETWORK_ERROR",
-                        HttpMessage = response?.Message ?? "Failed to connect to OKX API"
-                    };
-                }
-
-                var amendResponse = response.Data[0];
-
-                // Order-level error (sCode != "0")
-                if (amendResponse.StatusCode != "0")
-                {
-                    Log.Error($"OKXRestApiClient.AmendOrder(): Rejected - sCode: {amendResponse.StatusCode}, sMsg: {amendResponse.StatusMessage}");
-                    return new OrderResult<AmendOrderResponse>
-                    {
-                        IsSuccess = false,
-                        Data = amendResponse,
-                        HttpCode = response.Code,
-                        HttpMessage = response.Message,
-                        OrderStatusCode = amendResponse.StatusCode,
-                        OrderStatusMessage = amendResponse.StatusMessage
-                    };
-                }
-
-                // Success
-                return new OrderResult<AmendOrderResponse>
-                {
-                    IsSuccess = true,
-                    Data = amendResponse,
-                    HttpCode = response.Code,
-                    HttpMessage = response.Message
-                };
+                throw new InvalidOperationException(
+                    $"AmendOrder API error - code: {response?.Code}, msg: {response?.Message}");
             }
-            catch (Exception ex)
+
+            var amendResponse = response.Data[0];
+
+            if (amendResponse.StatusCode != "0")
             {
-                Log.Error($"OKXRestApiClient.AmendOrder(): Exception: {ex.Message}");
-                return new OrderResult<AmendOrderResponse>
-                {
-                    IsSuccess = false,
-                    HttpCode = "EXCEPTION",
-                    HttpMessage = ex.Message
-                };
+                throw new InvalidOperationException(
+                    $"AmendOrder rejected - sCode: {amendResponse.StatusCode}, sMsg: {amendResponse.StatusMessage}");
             }
+
+            return amendResponse;
         }
 
         /// <summary>
@@ -809,65 +739,30 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// Requires authentication
         /// </summary>
         /// <param name="request">Cancel order request</param>
-        /// <returns>Order result containing success status and error details</returns>
-        public OrderResult<CancelOrderResponse> CancelOrder(CancelOrderRequest request)
+        /// <returns>Cancel order response on success</returns>
+        /// <exception cref="InvalidOperationException">Thrown on API error or order rejection</exception>
+        public CancelOrderResponse CancelOrder(CancelOrderRequest request)
         {
-            try
+            var response = Post<OKXApiResponse<CancelOrderResponse>>(
+                "/trade/cancel-order",
+                request,
+                defaultValue: null);
+
+            if (response?.Data == null || response.Data.Count == 0)
             {
-                var response = Post<OKXApiResponse<CancelOrderResponse>>(
-                    "/trade/cancel-order",
-                    request,
-                    defaultValue: null);
-
-                // HTTP-level error
-                // Note: When code="1", data may still exist with sCode/sMsg details
-                if (response == null || response.Data == null || response.Data.Count == 0)
-                {
-                    Log.Error($"OKXRestApiClient.CancelOrder(): Failed - code: {response?.Code}, msg: {response?.Message}");
-                    return new OrderResult<CancelOrderResponse>
-                    {
-                        IsSuccess = false,
-                        HttpCode = response?.Code ?? "NETWORK_ERROR",
-                        HttpMessage = response?.Message ?? "Failed to connect to OKX API"
-                    };
-                }
-
-                var cancelResponse = response.Data[0];
-
-                // Order-level error (sCode != "0")
-                if (cancelResponse.StatusCode != "0")
-                {
-                    Log.Error($"OKXRestApiClient.CancelOrder(): Rejected - sCode: {cancelResponse.StatusCode}, sMsg: {cancelResponse.StatusMessage}");
-                    return new OrderResult<CancelOrderResponse>
-                    {
-                        IsSuccess = false,
-                        Data = cancelResponse,
-                        HttpCode = response.Code,
-                        HttpMessage = response.Message,
-                        OrderStatusCode = cancelResponse.StatusCode,
-                        OrderStatusMessage = cancelResponse.StatusMessage
-                    };
-                }
-
-                // Success
-                return new OrderResult<CancelOrderResponse>
-                {
-                    IsSuccess = true,
-                    Data = cancelResponse,
-                    HttpCode = response.Code,
-                    HttpMessage = response.Message
-                };
+                throw new InvalidOperationException(
+                    $"CancelOrder API error - code: {response?.Code}, msg: {response?.Message}");
             }
-            catch (Exception ex)
+
+            var cancelResponse = response.Data[0];
+
+            if (cancelResponse.StatusCode != "0")
             {
-                Log.Error($"OKXRestApiClient.CancelOrder(): Exception: {ex.Message}");
-                return new OrderResult<CancelOrderResponse>
-                {
-                    IsSuccess = false,
-                    HttpCode = "EXCEPTION",
-                    HttpMessage = ex.Message
-                };
+                throw new InvalidOperationException(
+                    $"CancelOrder rejected - sCode: {cancelResponse.StatusCode}, sMsg: {cancelResponse.StatusMessage}");
             }
+
+            return cancelResponse;
         }
 
         /// <summary>

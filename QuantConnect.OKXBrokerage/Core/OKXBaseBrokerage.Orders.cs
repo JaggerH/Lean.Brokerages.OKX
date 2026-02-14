@@ -52,24 +52,30 @@ namespace QuantConnect.Brokerages.OKX
             {
                 try
                 {
-                    // Rate limit order operations
                     OrderRateLimiter.WaitToProceed();
 
-                    // Convert LEAN symbol to OKX instrument ID
                     var instId = _symbolMapper.GetBrokerageSymbol(order.Symbol);
-
-                    // Determine trade mode based on account mode and security type
                     var tdMode = GetTradeMode(order.Symbol.SecurityType);
 
-                    // Route to appropriate handler based on order type
-                    if (IsSpotMarketBuy(order))
+                    // Build request based on order type
+                    var request = IsSpotMarketBuy(order)
+                        ? BuildSpotMarketBuyAsFokLimitRequest(order, instId, tdMode)
+                        : BuildStandardOrderRequest(order, instId, tdMode);
+
+                    // Add to cache before REST call so WithLockedStream-queued WS fills can find it
+                    CachedOrderIDs.TryAdd(order.Id, order);
+
+                    // Place order via REST API (throws on failure)
+                    var response = RestApiClient.PlaceOrder(request);
+
+                    order.BrokerId.Add(response.OrderId);
+
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
                     {
-                        submitted = PlaceSpotMarketBuyAsFokLimit(order, instId, tdMode);
-                    }
-                    else
-                    {
-                        submitted = PlaceStandardOrder(order, instId, tdMode);
-                    }
+                        Status = OrderStatus.Submitted
+                    });
+
+                    submitted = true;
                 }
                 catch (Exception ex)
                 {
@@ -84,7 +90,7 @@ namespace QuantConnect.Brokerages.OKX
                         Message = ex.Message
                     });
 
-                    submitted = true;  // Binance pattern: return true even on exception
+                    submitted = true;
                 }
             });
 
@@ -136,9 +142,8 @@ namespace QuantConnect.Brokerages.OKX
         /// This ensures immediate execution while protecting against excessive slippage.
         /// </para>
         /// </summary>
-        private bool PlaceSpotMarketBuyAsFokLimit(Order order, string instId, string tdMode)
+        private Messages.PlaceOrderRequest BuildSpotMarketBuyAsFokLimitRequest(Order order, string instId, string tdMode)
         {
-            // 1. Get BestAsk price via REST API
             var ticker = RestApiClient.GetTicker(instId)?.FirstOrDefault();
             var bestAsk = ticker?.LowestAsk ?? 0m;
 
@@ -147,42 +152,22 @@ namespace QuantConnect.Brokerages.OKX
                 throw new InvalidOperationException($"No price data available for {instId}");
             }
 
-            // 2. Calculate limit price with buffer (default 2%)
             var priceBuffer = DefaultMarketBuyPriceBuffer;
             var limitPrice = bestAsk * (1 + priceBuffer);
 
-            Log.Trace($"OKXBaseBrokerage.PlaceSpotMarketBuyAsFokLimit(): {instId} bestAsk={bestAsk}, limitPrice={limitPrice} (buffer={priceBuffer:P0})");
+            Log.Trace($"OKXBaseBrokerage.BuildSpotMarketBuyAsFokLimitRequest(): {instId} bestAsk={bestAsk}, limitPrice={limitPrice} (buffer={priceBuffer:P0})");
 
-            // 3. Add order to cache BEFORE placing
-            CachedOrderIDs.TryAdd(order.Id, order);
-
-            // 4. Build FOK limit order request
-            var request = new Messages.PlaceOrderRequest
+            return new Messages.PlaceOrderRequest
             {
                 InstrumentId = instId,
                 TradeMode = tdMode,
                 Side = "buy",
-                OrderType = "fok",  // Fill-or-Kill
+                OrderType = "fok",
                 Size = Math.Abs(order.Quantity).ToStringInvariant(),
                 Price = limitPrice.ToStringInvariant(),
                 ClientOrderId = order.Id.ToStringInvariant(),
                 Tag = HashOrderTag(order.Tag)
             };
-
-            // 5. Place order via REST API
-            var result = RestApiClient.PlaceOrder(request);
-
-            if (result.IsSuccess)
-            {
-                order.BrokerId.Add(result.Data.OrderId);
-
-                Log.Trace($"OKXBaseBrokerage.PlaceSpotMarketBuyAsFokLimit(): Converted market buy to FOK limit @ {limitPrice} " +
-                         $"(bestAsk={bestAsk}, buffer={priceBuffer:P0}) for {order.Quantity} {order.Symbol.ID}({order.Symbol.SecurityType}), OKX OrderId: {result.Data.OrderId}");
-                return true;
-            }
-
-            // Error - throw to let outer catch handle
-            throw new InvalidOperationException($"FOK limit @ {limitPrice} failed: {result.GetErrorMessage()}");
         }
 
         // ========================================
@@ -193,12 +178,10 @@ namespace QuantConnect.Brokerages.OKX
         /// Places a standard order (Limit, Market Sell, Futures/Swap orders)
         /// For these order types, sz is always in base currency or contract units
         /// </summary>
-        private bool PlaceStandardOrder(Order order, string instId, string tdMode)
+        private Messages.PlaceOrderRequest BuildStandardOrderRequest(Order order, string instId, string tdMode)
         {
-            // Determine order side
             var side = order.Quantity > 0 ? "buy" : "sell";
 
-            // Convert LEAN order type to OKX order type
             string ordType;
             string price = null;
 
@@ -223,11 +206,7 @@ namespace QuantConnect.Brokerages.OKX
                     throw new NotSupportedException($"Order type {order.Type} is not supported");
             }
 
-            // Add order to cache BEFORE placing via REST API
-            CachedOrderIDs.TryAdd(order.Id, order);
-
-            // Create place order request
-            var request = new Messages.PlaceOrderRequest
+            return new Messages.PlaceOrderRequest
             {
                 InstrumentId = instId,
                 TradeMode = tdMode,
@@ -237,29 +216,8 @@ namespace QuantConnect.Brokerages.OKX
                 Price = price,
                 ClientOrderId = order.Id.ToStringInvariant(),
                 Tag = HashOrderTag(order.Tag)
-                // Note: tgtCcy removed - not needed for Limit orders, Market Sell, or Futures/Swap
             };
-
-            // Place order via REST API
-            var result = RestApiClient.PlaceOrder(request);
-
-            if (result.IsSuccess)
-            {
-                order.BrokerId.Add(result.Data.OrderId);
-
-                var orderDetails = order.Type == OrderType.Limit
-                    ? $"{order.Type} {order.Direction} {order.Quantity} {order.Symbol.ID}({order.Symbol.SecurityType}) @ {((LimitOrder)order).LimitPrice}"
-                    : $"{order.Type} {order.Direction} {order.Quantity} {order.Symbol.ID}({order.Symbol.SecurityType})";
-
-                Log.Trace($"OKXBaseBrokerage.PlaceStandardOrder(): Order {order.Id} placed successfully - {orderDetails}, OKX OrderId: {result.Data.OrderId}");
-                return true;
-            }
-
-            // Error - throw to let outer catch handle
-            throw new InvalidOperationException($"Order failed: {result.GetErrorMessage()}");
         }
-
-
 
         /// <summary>
         /// Determines the trade mode (tdMode) based on account level and security type
@@ -330,17 +288,11 @@ namespace QuantConnect.Brokerages.OKX
                         NewPrice = newPrice
                     };
 
-                    // Amend order via REST API
-                    var result = RestApiClient.AmendOrder(request);
+                    // Amend order via REST API (throws on failure)
+                    RestApiClient.AmendOrder(request);
 
-                    if (result.IsSuccess)
-                    {
-                        Log.Trace($"OKXBaseBrokerage.UpdateOrder(): Order {order.Id} (OKX: {ordId}) updated successfully");
-                        submitted = true;
-                        return;
-                    }
-
-                    throw new InvalidOperationException($"Update failed: {result.GetErrorMessage()}");
+                    Log.Trace($"OKXBaseBrokerage.UpdateOrder(): Order {order.Id} (OKX: {ordId}) updated successfully");
+                    submitted = true;
                 }
                 catch (Exception ex)
                 {
@@ -387,17 +339,16 @@ namespace QuantConnect.Brokerages.OKX
                         OrderId = ordId
                     };
 
-                    // Cancel order via REST API
-                    var result = RestApiClient.CancelOrder(request);
+                    // Cancel order via REST API (throws on failure)
+                    RestApiClient.CancelOrder(request);
 
-                    if (result.IsSuccess)
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
                     {
-                        Log.Trace($"OKXBaseBrokerage.CancelOrder(): Order {order.Id} (OKX: {ordId}) canceled successfully");
-                        submitted = true;
-                        return;
-                    }
+                        Status = OrderStatus.Canceled
+                    });
 
-                    throw new InvalidOperationException($"Cancel failed: {result.GetErrorMessage()}");
+                    Log.Trace($"OKXBaseBrokerage.CancelOrder(): Order {order.Id} (OKX: {ordId}) canceled successfully");
+                    submitted = true;
                 }
                 catch (Exception ex)
                 {

@@ -207,14 +207,12 @@ namespace QuantConnect.Brokerages.OKX.Converters
     public static class WebSocketOrderExtensions
     {
         /// <summary>
-        /// Converts OKX WebSocket order update to LEAN OrderEvent.
-        /// Per OKX docs:
-        /// - When tradeId has value: this is a fill event
-        /// - When tradeId is empty and state=filled: this is a market order close event (ignore)
+        /// Converts OKX WebSocket fill event to LEAN OrderEvent.
+        /// Caller guarantees tradeId is present (state-change messages are filtered upstream).
         /// </summary>
-        /// <param name="order">OKX WebSocket order update</param>
+        /// <param name="order">OKX WebSocket order update (must have tradeId)</param>
         /// <param name="leanOrder">The LEAN order associated with this update</param>
-        /// <returns>LEAN OrderEvent or null if this update should be ignored</returns>
+        /// <returns>LEAN OrderEvent</returns>
         public static OrderEvent ToOrderEvent(this WebSocketOrder order, LeanOrder leanOrder)
         {
             if (order == null || leanOrder == null)
@@ -225,75 +223,51 @@ namespace QuantConnect.Brokerages.OKX.Converters
             // Map OKX state to LEAN OrderStatus
             var status = ConvertOrderStatus(order.State);
 
-            // Per OKX docs: tradeId indicates a fill event
-            if (!string.IsNullOrEmpty(order.TradeId))
+            // Parse fill data
+            var lastFillSize = ParseHelper.ParseDecimal(order.LastFillSize);
+            var lastFillPrice = ParseHelper.ParseDecimal(order.LastFillPrice ?? order.AveragePrice);
+            var lastFillFee = ParseHelper.ParseDecimal(order.LastFillFee);
+
+            // Parse accumulated fill size to determine actual completion status
+            var accFillSize = ParseHelper.ParseDecimal(order.FilledSize);
+            var orderSize = Math.Abs(leanOrder.Quantity);
+
+            // Determine final status based on accumulated fill vs order size
+            // Use 0.01% tolerance to handle precision/fee differences (e.g., 0.00999978 vs 0.01)
+            var finalStatus = accFillSize >= orderSize * 0.9999m
+                ? OrderStatus.Filled
+                : status;
+
+            var signedFillQty = order.Side == "buy" ? lastFillSize : -lastFillSize;
+            var feeCurrency = !string.IsNullOrEmpty(order.LastFillFeeCurrency)
+                ? order.LastFillFeeCurrency
+                : order.FeeCurrency ?? "USDT";
+
+            long fillTimeMs;
+            if (!string.IsNullOrEmpty(order.LastFillTime) && long.TryParse(order.LastFillTime, out fillTimeMs))
             {
-                // Parse fill data
-                var lastFillSize = ParseHelper.ParseDecimal(order.LastFillSize);
-                var lastFillPrice = ParseHelper.ParseDecimal(order.LastFillPrice ?? order.AveragePrice);
-                var lastFillFee = ParseHelper.ParseDecimal(order.LastFillFee);
-
-                // Parse accumulated fill size to determine actual completion status
-                var accFillSize = ParseHelper.ParseDecimal(order.FilledSize);
-                var orderSize = Math.Abs(leanOrder.Quantity);
-
-                // Determine final status based on accumulated fill vs order size
-                // Use 0.01% tolerance to handle precision/fee differences (e.g., 0.00999978 vs 0.01)
-                var finalStatus = accFillSize >= orderSize * 0.9999m
-                    ? OrderStatus.Filled
-                    : status;
-
-                var signedFillQty = order.Side == "buy" ? lastFillSize : -lastFillSize;
-                var feeCurrency = !string.IsNullOrEmpty(order.LastFillFeeCurrency)
-                    ? order.LastFillFeeCurrency
-                    : order.FeeCurrency ?? "USDT";
-
-                long fillTimeMs;
-                if (!string.IsNullOrEmpty(order.LastFillTime) && long.TryParse(order.LastFillTime, out fillTimeMs))
-                {
-                }
-                else if (long.TryParse(order.UpdateTime, out fillTimeMs))
-                {
-                }
-                else
-                {
-                    fillTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                }
-
-                return new OrderEvent(
-                    leanOrder.Id,
-                    leanOrder.Symbol,
-                    DateTimeOffset.FromUnixTimeMilliseconds(fillTimeMs).UtcDateTime,
-                    finalStatus,
-                    leanOrder.Direction,
-                    lastFillPrice,
-                    signedFillQty,
-                    new OrderFee(new CashAmount(Math.Abs(lastFillFee), feeCurrency)),
-                    $"OKX order {order.OrderId}: {order.State} -> {finalStatus}, Fill: {lastFillSize} @ {lastFillPrice}, AccFill: {accFillSize}/{orderSize}, TradeId: {order.TradeId}"
-                )
-                {
-                    ExecutionId = order.TradeId
-                };
+            }
+            else if (long.TryParse(order.UpdateTime, out fillTimeMs))
+            {
+            }
+            else
+            {
+                fillTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             }
 
-            // No tradeId: state=filled means market order close event, ignore it
-            if (status == OrderStatus.Filled)
+            return new OrderEvent(
+                leanOrder.Id,
+                leanOrder.Symbol,
+                DateTimeOffset.FromUnixTimeMilliseconds(fillTimeMs).UtcDateTime,
+                finalStatus,
+                leanOrder.Direction,
+                lastFillPrice,
+                signedFillQty,
+                new OrderFee(new CashAmount(Math.Abs(lastFillFee), feeCurrency)),
+                $"OKX order {order.OrderId}: {order.State} -> {finalStatus}, Fill: {lastFillSize} @ {lastFillPrice}, AccFill: {accFillSize}/{orderSize}, TradeId: {order.TradeId}"
+            )
             {
-                Log.Trace($"OrderConverter.ToOrderEvent(): Ignoring filled state without tradeId for order {order.OrderId}");
-                return null;
-            }
-
-            // Other state changes (Submitted, Canceled, etc.)
-            var updateTimeMs = ParseHelper.ParseLong(order.UpdateTime);
-            if (updateTimeMs == 0)
-            {
-                updateTimeMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            }
-
-            return new OrderEvent(leanOrder, DateTimeOffset.FromUnixTimeMilliseconds(updateTimeMs).UtcDateTime, OrderFee.Zero)
-            {
-                Status = status,
-                Message = $"OKX order {order.OrderId}: {order.State}"
+                ExecutionId = order.TradeId
             };
         }
 
