@@ -308,7 +308,6 @@ namespace QuantConnect.Brokerages.OKX
             // 8. Attach anonymous WebSocket event handlers (Binance pattern)
             WebSocket.Open += (sender, e) =>
             {
-                Log.Trace($"{GetType().Name}.WebSocket.Open: Connection established");
                 _keepAliveTimer.Start();
 
                 // Reset auth state and send authentication request (non-blocking)

@@ -137,8 +137,6 @@ namespace QuantConnect.Brokerages.OKX
                 // Send login request
                 var message = JsonConvert.SerializeObject(loginMessage);
                 WebSocket.Send(message);
-
-                Log.Trace("OKXBrokerage.SendAuthenticationRequest(): Login request sent");
             }
             catch (Exception ex)
             {
