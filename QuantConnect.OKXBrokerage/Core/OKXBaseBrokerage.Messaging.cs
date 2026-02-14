@@ -314,6 +314,10 @@ namespace QuantConnect.Brokerages.OKX
                     HandleOrderBookChannel(jObject);
                     break;
 
+                case "price-limit":
+                    HandlePriceLimitChannel(jObject);
+                    break;
+
                 default:
                     Log.Trace($"{GetType().Name}: Unknown channel: {channel}");
                     break;
@@ -608,6 +612,28 @@ namespace QuantConnect.Brokerages.OKX
             catch (Exception ex)
             {
                 Log.Error($"{GetType().Name}.HandleTradeUpdate(): Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles price-limit channel data push
+        /// Channel: price-limit (dynamic price limits for all instrument types)
+        /// </summary>
+        protected virtual void HandlePriceLimitChannel(JObject jObject)
+        {
+            try
+            {
+                var message = jObject.ToObject<WebSocketDataMessage<PriceLimit>>();
+                if (message.Data == null) return;
+
+                foreach (var data in message.Data)
+                {
+                    _priceLimitSync?.Writer.TryWrite(data);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandlePriceLimitChannel(): Error: {ex.Message}");
             }
         }
 

@@ -300,9 +300,12 @@ namespace QuantConnect.Brokerages.OKX
             };
 
             // 6. Initialize order book synchronizer
-            InitializeOrderBookSync();
+            CreateOrderBookSynchronizer();
 
-            // 7. Attach anonymous WebSocket event handlers (Binance pattern)
+            // 7. Initialize price limit synchronizer
+            CreatePriceLimitSynchronizer();
+
+            // 8. Attach anonymous WebSocket event handlers (Binance pattern)
             WebSocket.Open += (sender, e) =>
             {
                 Log.Trace($"{GetType().Name}.WebSocket.Open: Connection established");
@@ -521,9 +524,11 @@ namespace QuantConnect.Brokerages.OKX
             {
                 var brokerageSymbol = _symbolMapper.GetBrokerageSymbol(symbol);
 
-                // Pre-create synchronizer to start initialization
+                // Pre-create synchronizers to start initialization
                 // This creates the OrderBook state before any WebSocket messages arrive
                 _orderBookSync?.GetSynchronizer(symbol);
+                // Pre-create price limit synchronizer (triggers REST init)
+                _priceLimitSync?.GetSynchronizer(symbol);
 
                 // OKX v5 API subscription format: { "op": "subscribe", "args": [ { "channel": "...", "instId": "..." } ] }
                 // Subscribe to books channel (400-level orderbook depth)
@@ -556,6 +561,21 @@ namespace QuantConnect.Brokerages.OKX
                     }
                 };
                 webSocket.Send(JsonConvert.SerializeObject(tradesSubscribeMessage));
+
+                // Subscribe to price-limit channel (dynamic price limits)
+                var priceLimitSubscribeMessage = new Messages.WebSocketMessage
+                {
+                    Operation = "subscribe",
+                    Arguments = new List<object>
+                    {
+                        new Messages.WebSocketChannel
+                        {
+                            Channel = "price-limit",
+                            InstrumentId = brokerageSymbol
+                        }
+                    }
+                };
+                webSocket.Send(JsonConvert.SerializeObject(priceLimitSubscribeMessage));
 
                 return true;
             }
@@ -599,6 +619,9 @@ namespace QuantConnect.Brokerages.OKX
                 _orderBookSync?.RemoveState(symbol);
                 _orderBooks.TryRemove(symbol, out _);
 
+                // Clean up price limit sync state
+                _priceLimitSync?.RemoveState(symbol);
+
                 // Unsubscribe from trades channel
                 var tradesUnsubscribeMessage = new Messages.WebSocketMessage
                 {
@@ -613,6 +636,22 @@ namespace QuantConnect.Brokerages.OKX
                     }
                 };
                 webSocket.Send(JsonConvert.SerializeObject(tradesUnsubscribeMessage));
+
+                // Unsubscribe from price-limit channel
+                var priceLimitUnsubscribeMessage = new Messages.WebSocketMessage
+                {
+                    Operation = "unsubscribe",
+                    Arguments = new List<object>
+                    {
+                        new Messages.WebSocketChannel
+                        {
+                            Channel = "price-limit",
+                            InstrumentId = brokerageSymbol
+                        }
+                    }
+                };
+                webSocket.Send(JsonConvert.SerializeObject(priceLimitUnsubscribeMessage));
+
                 return true;
             }
             catch (Exception ex)
@@ -672,6 +711,7 @@ namespace QuantConnect.Brokerages.OKX
             _messageHandler?.DisposeSafely();
             OrderRateLimiter?.DisposeSafely();
             _orderBookSync?.Dispose();
+            _priceLimitSync?.Dispose();
 
             base.Dispose();
         }

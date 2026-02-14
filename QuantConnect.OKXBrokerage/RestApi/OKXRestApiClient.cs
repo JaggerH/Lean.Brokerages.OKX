@@ -36,6 +36,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         // Based on OKX API documentation: https://www.okx.com/docs-v5/en/#overview-rate-limit
         private readonly RateGate _candlesRateLimiter;  // /market/candles: 40 requests per 2 seconds
         private readonly RateGate _tradesRateLimiter;   // /market/trades: 100 requests per 2 seconds
+        private readonly RateGate _priceLimitRateLimiter;  // /public/price-limit: 20 requests per 2 seconds
 
         /// <summary>
         /// API prefix for OKX unified account (/api/v5)
@@ -64,6 +65,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         {
             _candlesRateLimiter = new RateGate(40, TimeSpan.FromSeconds(2));
             _tradesRateLimiter = new RateGate(100, TimeSpan.FromSeconds(2));
+            _priceLimitRateLimiter = new RateGate(20, TimeSpan.FromSeconds(2));
         }
 
         /// <summary>
@@ -288,6 +290,30 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 Log.Error($"OKXRestApiClient.GetTicker(): Exception: {ex.Message}");
                 return new List<Ticker>();
             }
+        }
+
+        /// <summary>
+        /// Gets price limit for a specific instrument via OKX v5 API
+        /// https://www.okx.com/docs-v5/en/#rest-api-public-data-get-limit-price
+        /// Returns the maximum buy price and minimum sell price for new orders.
+        /// </summary>
+        /// <param name="instId">Instrument ID (e.g., BTC-USDT, BTC-USDT-SWAP)</param>
+        /// <returns>PriceLimit data, or null if request fails</returns>
+        public PriceLimit GetPriceLimit(string instId)
+        {
+            _priceLimitRateLimiter?.WaitToProceed();
+            var queryString = $"instId={instId}";
+            var response = GetPublic<OKXApiResponse<PriceLimit>>(
+                "/public/price-limit",
+                queryString,
+                defaultValue: null);
+
+            if (response?.IsSuccess == true && response.Data?.Count > 0)
+            {
+                return response.Data[0];
+            }
+
+            return null;
         }
 
         /// <summary>

@@ -156,6 +156,74 @@ namespace QuantConnect.Brokerages.OKX.Tests
             Console.WriteLine($"BTC-USDT Ticker: Last={ticker.Last}, Bid={ticker.HighestBid}, Ask={ticker.LowestAsk}");
         }
 
+        /// <summary>
+        /// Tests GetPriceLimit endpoint for SPOT instrument
+        /// </summary>
+        [Test]
+        public void GetPriceLimit_BtcUsdt_ReturnsPriceLimit()
+        {
+            var priceLimit = _client.GetPriceLimit("BTC-USDT");
+
+            Assert.IsNotNull(priceLimit, "PriceLimit should not be null");
+            Assert.AreEqual("BTC-USDT", priceLimit.InstrumentId);
+
+            Console.WriteLine($"BTC-USDT PriceLimit: Enabled={priceLimit.Enabled}, BuyLmt={priceLimit.BuyLimit}, SellLmt={priceLimit.SellLimit}, Ts={priceLimit.Timestamp}");
+
+            if (priceLimit.Enabled)
+            {
+                var buyLmt = ParseHelper.ParseDecimal(priceLimit.BuyLimit);
+                var sellLmt = ParseHelper.ParseDecimal(priceLimit.SellLimit);
+                Assert.Greater(buyLmt, 0, "BuyLimit should be positive when enabled");
+                Assert.Greater(sellLmt, 0, "SellLimit should be positive when enabled");
+                Assert.Greater(buyLmt, sellLmt, "BuyLimit should be greater than SellLimit");
+            }
+        }
+
+        /// <summary>
+        /// Tests GetPriceLimit for LINK-USDT-SWAP — known to be actively constrained by price limits.
+        /// Fetches both price limit and ticker to show the gap between best ask and buyLmt.
+        /// </summary>
+        [Test]
+        public void GetPriceLimit_LinkUsdtSwap_ShowsTruncationGap()
+        {
+            var priceLimit = _client.GetPriceLimit("LINK-USDT-SWAP");
+
+            Assert.IsNotNull(priceLimit, "PriceLimit should not be null");
+            Assert.AreEqual("LINK-USDT-SWAP", priceLimit.InstrumentId);
+            Assert.IsTrue(priceLimit.Enabled, "SWAP instruments should have price limits enabled");
+
+            var buyLmt = ParseHelper.ParseDecimal(priceLimit.BuyLimit);
+            var sellLmt = ParseHelper.ParseDecimal(priceLimit.SellLimit);
+            Assert.Greater(buyLmt, 0, "BuyLimit should be positive");
+            Assert.Greater(sellLmt, 0, "SellLimit should be positive");
+            Assert.Greater(buyLmt, sellLmt, "BuyLimit should be greater than SellLimit");
+
+            // Fetch ticker to compare with price limits
+            var ticker = _client.GetTicker("LINK-USDT-SWAP")?.FirstOrDefault();
+            Assert.IsNotNull(ticker, "Ticker should not be null");
+
+            Console.WriteLine($"LINK-USDT-SWAP:");
+            Console.WriteLine($"  PriceLimit: BuyLmt={buyLmt}, SellLmt={sellLmt}");
+            Console.WriteLine($"  Ticker:     Bid={ticker.HighestBid}, Ask={ticker.LowestAsk}");
+
+            if (ticker.LowestAsk > buyLmt)
+            {
+                Console.WriteLine($"  ** PHANTOM LIQUIDITY DETECTED: best ask {ticker.LowestAsk} > buyLmt {buyLmt}");
+                Console.WriteLine($"     Asks above {buyLmt} would be truncated by TruncateByPriceLimit");
+            }
+        }
+
+        /// <summary>
+        /// Tests GetPriceLimit returns null for invalid instrument
+        /// </summary>
+        [Test]
+        public void GetPriceLimit_InvalidInstrument_ReturnsNull()
+        {
+            var priceLimit = _client.GetPriceLimit("INVALID-PAIR");
+
+            Assert.IsNull(priceLimit, "Should return null for invalid instrument");
+        }
+
         #endregion
 
         #region Private Endpoint Tests (Require Authentication)

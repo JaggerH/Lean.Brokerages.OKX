@@ -35,7 +35,7 @@ namespace QuantConnect.Brokerages.OKX
         /// Initializes the order book synchronizer
         /// Must be called after RestApiClient is initialized
         /// </summary>
-        protected virtual void InitializeOrderBookSync()
+        protected virtual void CreateOrderBookSynchronizer()
         {
             // Initialize order book synchronizer
             // Uses BrokerageMultiStateSynchronizer for automatic message routing and gap recovery
@@ -154,6 +154,9 @@ namespace QuantConnect.Brokerages.OKX
             if (orderBook != null)
             {
                 var orderbookData = orderBook.ToOrderbook();
+
+                // Truncate phantom liquidity beyond exchange price limits
+                TruncateByPriceLimit(orderbookData, e.Key);
 
                 lock (_aggregator)
                 {
