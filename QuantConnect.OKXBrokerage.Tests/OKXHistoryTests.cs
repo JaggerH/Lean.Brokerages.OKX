@@ -287,7 +287,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         /// Tests GetHistory for quote ticks (should return empty as not supported)
         /// </summary>
         [Test]
-        public void GetHistory_QuoteTick_ReturnsEmpty()
+        public void GetHistory_QuoteTick_ReturnsNull()
         {
             // Arrange
             var symbol = Symbol.Create("BTCUSDT", SecurityType.Crypto, Market.OKX);
@@ -309,14 +309,8 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 TickType.Quote
             );
 
-            // Act
-            var history = _brokerage.GetHistory(request).ToList();
-
-            // Assert
-            Assert.IsNotNull(history, "History should not be null");
-            Assert.IsEmpty(history, "Quote ticks should not be supported, should return empty");
-
-            Console.WriteLine("Quote ticks correctly return empty (not supported)");
+            // Act & Assert
+            Assert.IsNull(_brokerage.GetHistory(request), "Quote ticks not supported, should return null");
         }
 
         #endregion
@@ -376,7 +370,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
         /// Tests GetHistory with second resolution (should throw NotSupportedException)
         /// </summary>
         [Test]
-        public void GetHistory_SecondResolution_ThrowsException()
+        public void GetHistory_SecondResolution_ReturnsNull()
         {
             // Arrange
             var symbol = Symbol.Create("BTCUSDT", SecurityType.Crypto, Market.OKX);
@@ -399,14 +393,10 @@ namespace QuantConnect.Brokerages.OKX.Tests
             );
 
             // Act & Assert
-            Assert.Throws<NotSupportedException>(() =>
-            {
-                var history = _brokerage.GetHistory(request).ToList();
-            }, "Second resolution should throw NotSupportedException");
-
-            Console.WriteLine("Second resolution correctly throws NotSupportedException");
+            Assert.IsNull(_brokerage.GetHistory(request), "Second resolution not supported, should return null");
         }
 
         #endregion
+
     }
 }
