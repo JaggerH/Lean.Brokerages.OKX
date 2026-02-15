@@ -144,8 +144,20 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         private Messages.PlaceOrderRequest BuildSpotMarketBuyAsFokLimitRequest(Order order, string instId, string tdMode)
         {
-            var ticker = RestApiClient.GetTicker(instId)?.FirstOrDefault();
-            var bestAsk = ticker?.LowestAsk ?? 0m;
+            var bestAsk = 0m;
+
+            // Try local order book first (zero-latency, already synchronized)
+            if (_orderBooks.TryGetValue(order.Symbol, out var orderBook))
+            {
+                bestAsk = orderBook.BestAskPrice;
+            }
+
+            // Fall back to REST ticker only if order book has no data
+            if (bestAsk <= 0)
+            {
+                var ticker = RestApiClient.GetTicker(instId)?.FirstOrDefault();
+                bestAsk = ticker?.LowestAsk ?? 0m;
+            }
 
             if (bestAsk <= 0)
             {
