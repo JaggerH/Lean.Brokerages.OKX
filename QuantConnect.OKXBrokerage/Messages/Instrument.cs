@@ -96,16 +96,28 @@ namespace QuantConnect.Brokerages.OKX.Messages
         public string ExpiryTime { get; set; }
 
         /// <summary>
-        /// Maximum limit order size
+        /// Maximum limit order size (in lots/contracts for SWAP, base ccy for SPOT)
         /// </summary>
         [JsonProperty("maxLmtSz")]
         public string MaxLimitSize { get; set; }
 
         /// <summary>
-        /// Maximum market order size
+        /// Maximum market order size (in lots/contracts for SWAP, base ccy for SPOT sell)
         /// </summary>
         [JsonProperty("maxMktSz")]
         public string MaxMarketSize { get; set; }
+
+        /// <summary>
+        /// Maximum limit order amount (in quote currency, e.g. USDT)
+        /// </summary>
+        [JsonProperty("maxLmtAmt")]
+        public string MaxLimitAmount { get; set; }
+
+        /// <summary>
+        /// Maximum market order amount (in quote currency, e.g. USDT)
+        /// </summary>
+        [JsonProperty("maxMktAmt")]
+        public string MaxMarketAmount { get; set; }
 
         /// <summary>
         /// Minimum order size
