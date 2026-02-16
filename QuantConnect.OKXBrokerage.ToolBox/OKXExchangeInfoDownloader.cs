@@ -148,12 +148,16 @@ namespace QuantConnect.OKXBrokerage.ToolBox
                     ? $"{baseName} Perpetual"
                     : $"{baseCcy} Perpetual";
 
-                // Contract multiplier: use ctMult if available, otherwise default to 1
-                var contractMultiplier = string.IsNullOrEmpty(instrument.ContractMultiplier) ? 1m : decimal.Parse(instrument.ContractMultiplier);
+                // Contract multiplier: ctVal defines the face value per contract (e.g., 0.01 BTC per contract)
+                // ctMult is an additional scaling factor (typically 1 for linear contracts)
+                var ctVal = string.IsNullOrEmpty(instrument.ContractValue) ? 1m : decimal.Parse(instrument.ContractValue);
+                var ctMult = string.IsNullOrEmpty(instrument.ContractMultiplier) ? 1m : decimal.Parse(instrument.ContractMultiplier);
+                var contractMultiplier = ctVal * ctMult;
                 var tickSz = decimal.Parse(instrument.TickSize);
                 var lotSz = decimal.Parse(instrument.LotSize);
+                var minSz = decimal.Parse(instrument.MinSize);
 
-                yield return $"{Market.ToLowerInvariant()},{symbol},cryptofuture,{description},{quoteCcy},{contractMultiplier.NormalizeToStr()},{tickSz.NormalizeToStr()},{lotSz.NormalizeToStr()},{instrument.InstrumentId},,,";
+                yield return $"{Market.ToLowerInvariant()},{symbol},cryptofuture,{description},{quoteCcy},{contractMultiplier.NormalizeToStr()},{tickSz.NormalizeToStr()},{lotSz.NormalizeToStr()},{instrument.InstrumentId},{minSz.NormalizeToStr()},,";
             }
         }
 
