@@ -485,9 +485,9 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                // Add 5-minute buffer to account for potential timing differences
-                var beginMs = new DateTimeOffset(startTimeUtc).ToUnixTimeMilliseconds() - 300000;
-                var endMs = new DateTimeOffset(endTimeUtc).ToUnixTimeMilliseconds() + 300000;
+                // Add 30-second buffer to account for potential timing differences
+                var beginMs = new DateTimeOffset(startTimeUtc).ToUnixTimeMilliseconds() - 30000;
+                var endMs = new DateTimeOffset(endTimeUtc).ToUnixTimeMilliseconds() + 30000;
 
                 // Get fills for all instrument types
                 var fills = RestApiClient.GetExecutionHistory(null, null, beginMs, endMs);
