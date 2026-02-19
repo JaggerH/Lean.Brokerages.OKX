@@ -80,11 +80,6 @@ namespace QuantConnect.Brokerages.OKX
     /// Helper class for matching OKX Spot-Future pairs with volume filtering
     /// Provides methods to identify and query qualified trading pairs based on 24h volume
     /// </summary>
-    /// <remarks>
-    /// Supports two pairing types:
-    /// 1. Crypto-Stock: Tokenized stock Spot-Future matching (filters Spot volume only)
-    /// 2. Spot-Future: Regular crypto Spot-Future matching (filters both legs' volume)
-    /// </remarks>
     public static class OKXPairMatcher
     {
         /// <summary>
@@ -94,62 +89,21 @@ namespace QuantConnect.Brokerages.OKX
         public const decimal DefaultMinVolumeUsdt = 300000m;
 
         /// <summary>
-        /// Supported tokenized stock providers
-        /// </summary>
-        private static readonly string[] TokenizedProviders = { "xStock", "Ondo Tokenized" };
-
-        /// <summary>
-        /// Gets tokenized stock pairs with their underlying equity symbols (Simplified version)
-        /// Automatically creates API clients from configuration for volume filtering
-        /// </summary>
-        /// <param name="type">Filter type: "spot", "future", or "all" (default)</param>
-        /// <param name="minVolumeUsdt">Minimum 24h USDT volume threshold</param>
-        /// <returns>List of SymbolPair (TokenizedStock, EquitySymbol) sorted by volume descending</returns>
-        public static List<SymbolPair> GetTokenizedStockPairs(
-            string type = "all",
-            decimal minVolumeUsdt = DefaultMinVolumeUsdt)
-        {
-            try
-            {
-                Log.Trace($"OKXPairMatcher.GetTokenizedStockPairs(): Starting with type={type}, minVolume={minVolumeUsdt} USDT");
-
-                // Get all tokenized stock pairs from database
-                var allTokenizedPairs = GetAllTokenizedStockPairsInternal(type);
-                if (allTokenizedPairs.Count == 0)
-                {
-                    Log.Trace("OKXPairMatcher.GetTokenizedStockPairs(): No tokenized stock pairs found in database");
-                    return new List<SymbolPair>();
-                }
-
-                Log.Trace($"OKXPairMatcher.GetTokenizedStockPairs(): Found {allTokenizedPairs.Count} tokenized pairs in database");
-
-                // Apply volume filter
-                var filteredPairs = FilterByVolume(allTokenizedPairs, minVolumeUsdt);
-
-                Log.Trace($"OKXPairMatcher.GetTokenizedStockPairs(): {filteredPairs.Count} pairs passed volume filter");
-
-                return filteredPairs;
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "OKXPairMatcher.GetTokenizedStockPairs(): Error getting tokenized stock pairs");
-                return new List<SymbolPair>();
-            }
-        }
-
-        /// <summary>
-        /// Gets regular crypto Spot-Future pairs with dual-leg volume filtering (Simplified version)
+        /// Gets regular crypto Spot-Future pairs with dual-leg volume filtering
         /// Automatically creates API clients from configuration
         /// Both Spot and Futures must meet minimum volume threshold
         /// </summary>
         /// <param name="minVolumeUsdt">Minimum 24h USDT volume threshold</param>
+        /// <param name="requireMarginTrading">If true, excludes pairs whose spot leg has no MARGIN instrument
+        /// (required for portfolio margin mode where OKX routes spot orders through margin account)</param>
         /// <returns>List of SymbolPair sorted by combined volume descending</returns>
         public static List<SymbolPair> GetSpotFuturePairs(
-            decimal minVolumeUsdt = DefaultMinVolumeUsdt)
+            decimal minVolumeUsdt = DefaultMinVolumeUsdt,
+            bool requireMarginTrading = false)
         {
             try
             {
-                Log.Trace($"OKXPairMatcher.GetSpotFuturePairs(): Starting with minVolume={minVolumeUsdt} USDT");
+                Log.Trace($"OKXPairMatcher.GetSpotFuturePairs(): Starting with minVolume={minVolumeUsdt} USDT, requireMarginTrading={requireMarginTrading}");
 
                 // Get all spot-future pairs from database
                 var allPairs = GetAllSpotFuturePairsInternal();
@@ -162,9 +116,9 @@ namespace QuantConnect.Brokerages.OKX
                 Log.Trace($"OKXPairMatcher.GetSpotFuturePairs(): Found {allPairs.Count} pairs in database");
 
                 // Apply volume filter (both legs must meet threshold since both are Market.OKX)
-                var filteredPairs = FilterByVolume(allPairs, minVolumeUsdt);
+                var filteredPairs = FilterByVolume(allPairs, minVolumeUsdt, requireMarginTrading);
 
-                Log.Trace($"OKXPairMatcher.GetSpotFuturePairs(): {filteredPairs.Count} pairs passed volume filter");
+                Log.Trace($"OKXPairMatcher.GetSpotFuturePairs(): {filteredPairs.Count} pairs passed all filters");
 
                 return filteredPairs;
             }
@@ -176,42 +130,8 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Gets all qualified pairs (both tokenized stocks and regular crypto) (Simplified version)
-        /// Automatically creates API clients from configuration
-        /// </summary>
-        /// <param name="minVolumeUsdt">Minimum 24h USDT volume threshold</param>
-        /// <returns>Combined list of all qualified SymbolPairs sorted by volume</returns>
-        public static List<SymbolPair> GetAllQualifiedPairs(
-            decimal minVolumeUsdt = DefaultMinVolumeUsdt)
-        {
-            try
-            {
-                Log.Trace($"OKXPairMatcher.GetAllQualifiedPairs(): Starting with minVolume={minVolumeUsdt} USDT");
-
-                var tokenizedPairs = GetTokenizedStockPairs("all", minVolumeUsdt);
-                var regularPairs = GetSpotFuturePairs(minVolumeUsdt);
-
-                // Combine and remove duplicates (tokenized stocks might also appear in regular pairs)
-                var tokenizedSymbols = new HashSet<string>(tokenizedPairs.Select(p => p[0].Value));
-                var uniquePairs = tokenizedPairs
-                    .Concat(regularPairs.Where(p => !tokenizedSymbols.Contains(p[0].Value)))
-                    .ToList();
-
-                Log.Trace($"OKXPairMatcher.GetAllQualifiedPairs(): Total {uniquePairs.Count} qualified pairs ({tokenizedPairs.Count} tokenized + {regularPairs.Count - (regularPairs.Count - (uniquePairs.Count - tokenizedPairs.Count))} regular)");
-
-                return uniquePairs;
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "OKXPairMatcher.GetAllQualifiedPairs(): Error getting all qualified pairs");
-                return new List<SymbolPair>();
-            }
-        }
-
-        /// <summary>
         /// Gets all Spot-Future pairs from SymbolPropertiesDatabase
         /// Matches symbols with the same name in both Crypto and CryptoFuture security types
-        /// Excludes tokenized stocks (those are handled by GetTokenizedStockPairs)
         /// </summary>
         /// <returns>List of SymbolPair (SpotSymbol, FuturesSymbol)</returns>
         private static List<SymbolPair> GetAllSpotFuturePairsInternal()
@@ -221,13 +141,11 @@ namespace QuantConnect.Brokerages.OKX
 
             // Get all Spot symbols (Crypto)
             var spotSymbols = database.GetSymbolPropertiesList(Market.OKX, SecurityType.Crypto)
-                .Where(kvp => !IsTokenizedStockDescription(kvp.Value.Description))
                 .Select(kvp => kvp.Key.Symbol)
                 .ToHashSet();
 
             // Get all Futures symbols (CryptoFuture)
             var futuresSymbols = database.GetSymbolPropertiesList(Market.OKX, SecurityType.CryptoFuture)
-                .Where(kvp => !IsTokenizedStockDescription(kvp.Value.Description))
                 .Select(kvp => kvp.Key.Symbol)
                 .ToHashSet();
 
@@ -245,151 +163,22 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Gets all tokenized stock pairs with their underlying equity symbols from SymbolPropertiesDatabase
-        /// </summary>
-        /// <param name="type">Filter type: "spot", "future", or "all"</param>
-        /// <returns>List of SymbolPair (TokenizedStock, EquitySymbol)</returns>
-        private static List<SymbolPair> GetAllTokenizedStockPairsInternal(string type = "all")
-        {
-            var result = new List<SymbolPair>();
-            var database = SymbolPropertiesDatabase.FromDataFolder();
-            var normalizedType = type?.ToLowerInvariant() ?? "all";
-
-            // Get Spot tokenized stocks if type is "spot" or "all"
-            if (normalizedType == "spot" || normalizedType == "all")
-            {
-                var spotSymbols = database.GetSymbolPropertiesList(Market.OKX, SecurityType.Crypto)
-                    .Where(kvp => IsTokenizedStockDescription(kvp.Value.Description));
-
-                foreach (var kvp in spotSymbols)
-                {
-                    var leanSymbolValue = kvp.Key.Symbol; // e.g., "AAPLXUSDT"
-                    var description = kvp.Value.Description;
-
-                    if (TryExtractEquityTicker(leanSymbolValue, description, out var equityTicker))
-                    {
-                        var tokenizedSymbol = Symbol.Create(leanSymbolValue, SecurityType.Crypto, Market.OKX);
-                        var equitySymbol = CreateEquitySymbol(equityTicker);
-                        result.Add(new SymbolPair(tokenizedSymbol, equitySymbol));
-                    }
-                }
-            }
-
-            // Get Futures tokenized stocks if type is "future" or "all"
-            if (normalizedType == "future" || normalizedType == "all")
-            {
-                var futuresSymbols = database.GetSymbolPropertiesList(Market.OKX, SecurityType.CryptoFuture)
-                    .Where(kvp => IsTokenizedStockDescription(kvp.Value.Description));
-
-                foreach (var kvp in futuresSymbols)
-                {
-                    var leanSymbolValue = kvp.Key.Symbol; // e.g., "AAPLXUSDT"
-                    var description = kvp.Value.Description;
-
-                    if (TryExtractEquityTicker(leanSymbolValue, description, out var equityTicker))
-                    {
-                        var tokenizedSymbol = Symbol.Create(leanSymbolValue, SecurityType.CryptoFuture, Market.OKX);
-                        var equitySymbol = CreateEquitySymbol(equityTicker);
-                        result.Add(new SymbolPair(tokenizedSymbol, equitySymbol));
-                    }
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Checks if a description indicates a tokenized stock
-        /// </summary>
-        /// <param name="description">Symbol description</param>
-        /// <returns>True if description contains tokenized stock keywords</returns>
-        private static bool IsTokenizedStockDescription(string description)
-        {
-            if (string.IsNullOrEmpty(description))
-            {
-                return false;
-            }
-
-            foreach (var provider in TokenizedProviders)
-            {
-                if (description.Contains(provider))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Tries to extract the underlying equity ticker from a TokenizedStock symbol
-        /// </summary>
-        /// <param name="symbolValue">Symbol.Value (e.g., AAPLXUSDT)</param>
-        /// <param name="description">SymbolProperties.Description</param>
-        /// <param name="equityTicker">Output: equity ticker (e.g., AAPL)</param>
-        /// <returns>True if this is a TokenizedStock and extraction succeeded</returns>
-        private static bool TryExtractEquityTicker(
-            string symbolValue,
-            string description,
-            out string equityTicker)
-        {
-            equityTicker = null;
-
-            if (string.IsNullOrEmpty(description) || string.IsNullOrEmpty(symbolValue))
-                return false;
-
-            // Step 1: Determine provider type from description
-            string separator;
-            if (description.Contains("xStock"))
-            {
-                separator = "X";      // xStock: AAPLXUSDT -> AAPL
-            }
-            else if (description.Contains("Ondo Tokenized"))
-            {
-                separator = "ON";     // Ondo: AAPLONUSDT -> AAPL
-            }
-            else
-            {
-                return false;         // Not a TokenizedStock
-            }
-
-            // Step 2: Extract equity ticker from Symbol.Value using separator
-            var index = symbolValue.IndexOf(separator);
-            if (index > 0)
-            {
-                equityTicker = symbolValue.Substring(0, index);
-                return true;
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Creates an Equity Symbol for the underlying stock
-        /// </summary>
-        /// <param name="ticker">Stock ticker (e.g., AAPL)</param>
-        /// <returns>Equity Symbol in Market.USA</returns>
-        private static Symbol CreateEquitySymbol(string ticker)
-        {
-            return Symbol.Create(ticker, SecurityType.Equity, Market.USA);
-        }
-
-        /// <summary>
-        /// Filters SymbolPairs by volume threshold
-        /// Only checks Market.OKX symbols, skips non-OKX symbols (e.g., EquitySymbol)
-        /// Uses OKX v5 /market/tickers endpoint with instType parameter
+        /// Filters SymbolPairs by volume threshold and optionally by margin trading availability.
+        /// Uses OKX v5 /market/tickers and /public/instruments endpoints.
         /// </summary>
         /// <param name="pairs">List of SymbolPairs to filter</param>
         /// <param name="minVolumeUsdt">Minimum 24h USDT volume threshold</param>
-        /// <returns>Filtered list of SymbolPairs with volume data, sorted by volume descending</returns>
+        /// <param name="requireMarginTrading">If true, excludes pairs whose spot leg has no MARGIN instrument</param>
+        /// <returns>Filtered list of SymbolPairs sorted by volume descending</returns>
         private static List<SymbolPair> FilterByVolume(
             List<SymbolPair> pairs,
-            decimal minVolumeUsdt)
+            decimal minVolumeUsdt,
+            bool requireMarginTrading = false)
         {
             var client = CreateApiClient();
             var symbolMapper = new OKXSymbolMapper(Market.OKX);
 
-            // Fetch all tickers (SPOT + SWAP) in one call
+            // Fetch all tickers (SPOT + SWAP)
             var allTickers = client.GetTicker()
                 .Where(t => !string.IsNullOrEmpty(t.CurrencyPair))
                 .ToDictionary(t => t.CurrencyPair, t => t);
@@ -402,60 +191,45 @@ namespace QuantConnect.Brokerages.OKX
 
             Log.Trace($"OKXPairMatcher.FilterByVolume(): Fetched {allTickers.Count} tickers");
 
-            var qualifiedPairs = new List<(SymbolPair Pair, decimal MaxVolume)>();
-
-            foreach (var pair in pairs)
+            // Fetch margin instruments if needed (for portfolio margin mode filtering)
+            HashSet<string> marginInstIds = null;
+            if (requireMarginTrading)
             {
-                bool allOKXLegsQualified = true;
-                decimal maxVolume = 0m;
-
-                foreach (var symbol in pair)
+                var marginInstruments = client.GetInstruments("MARGIN");
+                if (marginInstruments.Count == 0)
                 {
-                    // Skip non-OKX market symbols (e.g., EquitySymbol in Market.USA)
-                    if (symbol.ID.Market != Market.OKX)
-                        continue;
-
-                    // Use SymbolMapper to get the correct OKX instId (e.g., BTC-USDT, BTC-USDT-SWAP)
-                    string instId;
-                    try
-                    {
-                        instId = symbolMapper.GetBrokerageSymbol(symbol);
-                    }
-                    catch (ArgumentException)
-                    {
-                        allOKXLegsQualified = false;
-                        break;
-                    }
-
-                    if (allTickers.TryGetValue(instId, out var ticker) &&
-                        !string.IsNullOrEmpty(ticker.QuoteVolume) &&
-                        decimal.TryParse(ticker.QuoteVolume, NumberStyles.Any, CultureInfo.InvariantCulture, out var volume))
-                    {
-                        if (volume < minVolumeUsdt)
-                        {
-                            allOKXLegsQualified = false;
-                            break;
-                        }
-                        maxVolume = Math.Max(maxVolume, volume);
-                    }
-                    else
-                    {
-                        // No ticker data available for this OKX symbol
-                        allOKXLegsQualified = false;
-                        break;
-                    }
+                    Log.Error("OKXPairMatcher.FilterByVolume(): Failed to fetch MARGIN instruments");
+                    return new List<SymbolPair>();
                 }
-
-                if (allOKXLegsQualified)
-                {
-                    qualifiedPairs.Add((pair, maxVolume));
-                }
+                marginInstIds = new HashSet<string>(marginInstruments.Select(i => i.InstrumentId));
+                Log.Trace($"OKXPairMatcher.FilterByVolume(): Fetched {marginInstIds.Count} MARGIN instruments");
             }
 
-            // Sort by volume descending
-            return qualifiedPairs
-                .OrderByDescending(p => p.MaxVolume)
-                .Select(p => p.Pair)
+            return pairs
+                .Select(pair => (
+                    Pair: pair,
+                    // InstIds order matches SymbolPair order: [0]=spot, [1]=futures
+                    InstIds: pair
+                        .Select(s => { try { return symbolMapper.GetBrokerageSymbol(s); } catch (ArgumentException) { return null; } })
+                        .ToList()
+                ))
+                // All legs must resolve to a valid instId
+                .Where(x => x.InstIds.All(id => id != null))
+                // Margin filter: spot leg (InstIds[0]) must exist in MARGIN instruments
+                .Where(x => marginInstIds == null || marginInstIds.Contains(x.InstIds[0]))
+                // Volume filter: all legs must meet minimum volume
+                .Select(x => (
+                    x.Pair,
+                    Volumes: x.InstIds
+                        .Select(id => allTickers.TryGetValue(id, out var t) &&
+                                      !string.IsNullOrEmpty(t.QuoteVolume) &&
+                                      decimal.TryParse(t.QuoteVolume, NumberStyles.Any, CultureInfo.InvariantCulture, out var v)
+                                      ? v : -1m)
+                        .ToList()
+                ))
+                .Where(x => x.Volumes.All(v => v >= minVolumeUsdt))
+                .OrderByDescending(x => x.Volumes.Max())
+                .Select(x => x.Pair)
                 .ToList();
         }
 

@@ -120,68 +120,39 @@ namespace QuantConnect.OKXBrokerage.Tests
 
         /// <summary>
         /// Integration test - requires API access
+        /// Verifies that requireMarginTrading filters out pairs without MARGIN instruments
         /// </summary>
         [Test]
         [Category("Integration")]
-        public void GetTokenizedStockPairs_SpotOnly_ReturnsValidPairs()
+        public void GetSpotFuturePairs_RequireMarginTrading_ReturnsSubsetOfAll()
         {
             // Act
-            var pairs = OKXPairMatcher.GetTokenizedStockPairs(type: "spot", minVolumeUsdt: 0m);
+            var allPairs = OKXPairMatcher.GetSpotFuturePairs(minVolumeUsdt: 0m, requireMarginTrading: false);
+            var marginPairs = OKXPairMatcher.GetSpotFuturePairs(minVolumeUsdt: 0m, requireMarginTrading: true);
 
             // Assert
-            Assert.IsNotNull(pairs);
+            Assert.IsNotNull(marginPairs);
+            Assert.Greater(marginPairs.Count, 0, "Should find at least one pair with margin trading");
+            Assert.LessOrEqual(marginPairs.Count, allPairs.Count, "Margin filter should not increase pair count");
 
-            foreach (var pair in pairs)
+            TestContext.WriteLine($"All pairs: {allPairs.Count}, Margin pairs: {marginPairs.Count}, Excluded: {allPairs.Count - marginPairs.Count}");
+
+            var marginSymbols = new System.Collections.Generic.HashSet<string>(marginPairs.Select(p => p[0].Value));
+            foreach (var pair in marginPairs)
             {
-                Assert.AreEqual(SecurityType.Crypto, pair[0].SecurityType, "First should be Spot TokenizedStock");
-                Assert.AreEqual(SecurityType.Equity, pair[1].SecurityType, "Second should be Equity");
-                Assert.AreEqual(Market.OKX, pair[0].ID.Market);
-                Assert.AreEqual(Market.USA, pair[1].ID.Market);
+                Assert.AreEqual(SecurityType.Crypto, pair[0].SecurityType, "First should be Spot");
+                Assert.AreEqual(SecurityType.CryptoFuture, pair[1].SecurityType, "Second should be Futures");
             }
-        }
 
-        /// <summary>
-        /// Integration test - requires API access
-        /// </summary>
-        [Test]
-        [Category("Integration")]
-        public void GetTokenizedStockPairs_FutureOnly_ReturnsValidPairs()
-        {
-            // Act
-            var pairs = OKXPairMatcher.GetTokenizedStockPairs(type: "future", minVolumeUsdt: 0m);
-
-            // Assert
-            Assert.IsNotNull(pairs);
-
-            foreach (var pair in pairs)
+            // Verify the filter actually excluded something (there should be pairs without margin)
+            if (allPairs.Count > marginPairs.Count)
             {
-                Assert.AreEqual(SecurityType.CryptoFuture, pair[0].SecurityType, "First should be Futures TokenizedStock");
-                Assert.AreEqual(SecurityType.Equity, pair[1].SecurityType, "Second should be Equity");
-                Assert.AreEqual(Market.OKX, pair[0].ID.Market);
-                Assert.AreEqual(Market.USA, pair[1].ID.Market);
-            }
-        }
-
-        /// <summary>
-        /// Integration test - requires API access
-        /// </summary>
-        [Test]
-        [Category("Integration")]
-        [Explicit("Requires API access")]        public void GetAllQualifiedPairs_ReturnsValidPairs()
-        {
-            // Act
-            var pairs = OKXPairMatcher.GetAllQualifiedPairs(minVolumeUsdt: 1000000m);
-
-            // Assert
-            Assert.IsNotNull(pairs);
-
-            foreach (var pair in pairs)
-            {
-                // First symbol is always from OKX market
-                Assert.AreEqual(Market.OKX, pair[0].ID.Market);
-
-                // Second symbol can be OKX (Futures) or USA (Equity)
-                Assert.That(pair[1].ID.Market, Is.EqualTo(Market.OKX).Or.EqualTo(Market.USA));
+                var excluded = allPairs.Where(p => !marginSymbols.Contains(p[0].Value)).ToList();
+                TestContext.WriteLine($"Excluded pairs (no margin trading):");
+                foreach (var pair in excluded.Take(10))
+                {
+                    TestContext.WriteLine($"  {pair[0].Value}");
+                }
             }
         }
 
