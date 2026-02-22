@@ -288,10 +288,11 @@ namespace QuantConnect.Brokerages.OKX.Tests
         }
 
         /// <summary>
-        /// Tests that updating an order without broker ID fails
+        /// Tests that updating an order without broker ID reports error via event
+        /// (Binance pattern: always returns true, errors reported via BrokerageMessageEvent)
         /// </summary>
         [Test]
-        public void UpdateOrder_NoBrokerId_Fails()
+        public void UpdateOrder_NoBrokerId_ReportsError()
         {
             // Arrange - Create order without broker ID
             var order = CreateOrderWithId(new LimitOrder(
@@ -301,11 +302,16 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 DateTime.UtcNow
             ));
 
+            var brokerageMessages = new List<BrokerageMessageEvent>();
+            _brokerage.Message += (sender, e) => brokerageMessages.Add(e);
+
             // Act
             var result = _brokerage.UpdateOrder(order);
 
-            // Assert
-            Assert.IsFalse(result, "UpdateOrder should return false without broker ID");
+            // Assert - Binance pattern: returns true, error via event
+            Assert.IsTrue(result, "UpdateOrder always returns true (Binance pattern)");
+            Assert.IsTrue(brokerageMessages.Any(m => m.Code == "ORDER_UPDATE_ERROR"),
+                "Should receive ORDER_UPDATE_ERROR brokerage message");
         }
 
         #endregion
@@ -345,10 +351,11 @@ namespace QuantConnect.Brokerages.OKX.Tests
         }
 
         /// <summary>
-        /// Tests that canceling an order without broker ID fails
+        /// Tests that canceling an order without broker ID reports error via event
+        /// (Binance pattern: always returns true, errors reported via BrokerageMessageEvent)
         /// </summary>
         [Test]
-        public void CancelOrder_NoBrokerId_Fails()
+        public void CancelOrder_NoBrokerId_ReportsError()
         {
             // Arrange - Create order without broker ID
             var order = CreateOrderWithId(new LimitOrder(
@@ -358,11 +365,16 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 DateTime.UtcNow
             ));
 
+            var brokerageMessages = new List<BrokerageMessageEvent>();
+            _brokerage.Message += (sender, e) => brokerageMessages.Add(e);
+
             // Act
             var result = _brokerage.CancelOrder(order);
 
-            // Assert
-            Assert.IsFalse(result, "CancelOrder should return false without broker ID");
+            // Assert - Binance pattern: returns true, error via event
+            Assert.IsTrue(result, "CancelOrder always returns true (Binance pattern)");
+            Assert.IsTrue(brokerageMessages.Any(m => m.Code == "ORDER_CANCEL_ERROR"),
+                "Should receive ORDER_CANCEL_ERROR brokerage message");
         }
 
         #endregion
@@ -415,12 +427,13 @@ namespace QuantConnect.Brokerages.OKX.Tests
         #region Error Handling Tests
 
         /// <summary>
-        /// Tests that unsupported order types are rejected
+        /// Tests that unsupported order types report error via Invalid OrderEvent
+        /// (Binance pattern: always returns true, errors reported via events)
         /// </summary>
         [Test]
-        public void PlaceOrder_StopMarketOrder_ReturnsError()
+        public void PlaceOrder_StopMarketOrder_ReportsError()
         {
-            // Arrange - Create stop market order (not supported in Phase 5)
+            // Arrange - Create stop market order (not supported)
             var order = CreateOrderWithId(new StopMarketOrder(
                 _btcusdtSymbol,
                 quantity: 0.001m,
@@ -431,11 +444,11 @@ namespace QuantConnect.Brokerages.OKX.Tests
             // Act
             var result = _brokerage.PlaceOrder(order);
 
-            // Assert
-            Assert.IsFalse(result, "StopMarket orders should not be supported");
-
-            // Note: OrderEvent may or may not be fired depending on implementation
+            // Assert - Binance pattern: returns true, error via OrderEvent
+            Assert.IsTrue(result, "PlaceOrder always returns true (Binance pattern)");
             Thread.Sleep(500);
+            var invalidEvent = _orderEvents.FirstOrDefault(e => e.Status == OrderStatus.Invalid);
+            Assert.IsNotNull(invalidEvent, "Should receive Invalid OrderEvent for unsupported order type");
         }
 
         /// <summary>
@@ -466,6 +479,16 @@ namespace QuantConnect.Brokerages.OKX.Tests
         #region REST API Direct Tests
 
         /// <summary>
+        /// Resolves trade mode from config, matching OKXBaseBrokerage.GetTradeMode() logic
+        /// </summary>
+        private static string GetTestTradeMode()
+        {
+            var mode = Config.Get("okx-unified-account-mode", "spot");
+            // Simple mode ("spot"): Spot uses "cash"; all other modes use "cross"
+            return mode.Equals("spot", StringComparison.OrdinalIgnoreCase) ? "cash" : "cross";
+        }
+
+        /// <summary>
         /// Tests PlaceOrder REST API method directly
         /// </summary>
         [Test]
@@ -476,13 +499,13 @@ namespace QuantConnect.Brokerages.OKX.Tests
             var request = new Messages.PlaceOrderRequest
             {
                 InstrumentId = "BTC-USDT",
-                TradeMode = "cash",
+                TradeMode = GetTestTradeMode(),
                 Side = "buy",
                 OrderType = "limit",
                 Size = "0.001",
                 Price = "10000",
-                ClientOrderId = $"test-{DateTime.UtcNow.Ticks}",
-                Tag = "LEAN-TEST"
+                ClientOrderId = $"t{DateTime.UtcNow.Ticks}",
+                Tag = "LEANTEST"
             };
 
             // Act - throws on failure
@@ -515,13 +538,13 @@ namespace QuantConnect.Brokerages.OKX.Tests
             var placeRequest = new Messages.PlaceOrderRequest
             {
                 InstrumentId = "BTC-USDT",
-                TradeMode = "cash",
+                TradeMode = GetTestTradeMode(),
                 Side = "buy",
                 OrderType = "limit",
                 Size = "0.001",
                 Price = "10000",
-                ClientOrderId = $"test-{DateTime.UtcNow.Ticks}",
-                Tag = "LEAN-TEST"
+                ClientOrderId = $"t{DateTime.UtcNow.Ticks}",
+                Tag = "LEANTEST"
             };
 
             var placeResponse = restClient.PlaceOrder(placeRequest);
@@ -564,13 +587,13 @@ namespace QuantConnect.Brokerages.OKX.Tests
             var placeRequest = new Messages.PlaceOrderRequest
             {
                 InstrumentId = "BTC-USDT",
-                TradeMode = "cash",
+                TradeMode = GetTestTradeMode(),
                 Side = "buy",
                 OrderType = "limit",
                 Size = "0.001",
                 Price = "10000",
-                ClientOrderId = $"test-{DateTime.UtcNow.Ticks}",
-                Tag = "LEAN-TEST"
+                ClientOrderId = $"t{DateTime.UtcNow.Ticks}",
+                Tag = "LEANTEST"
             };
 
             var placeResponse = restClient.PlaceOrder(placeRequest);
