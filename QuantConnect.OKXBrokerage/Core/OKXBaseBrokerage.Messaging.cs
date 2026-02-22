@@ -22,6 +22,7 @@ using QuantConnect.Brokerages.OKX.Messages;
 using QuantConnect.Data.Market;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
+using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 using QuantConnect.Securities.UnifiedMargin;
 
@@ -358,24 +359,38 @@ namespace QuantConnect.Brokerages.OKX
         /// Per OKX docs:
         /// - When tradeId has value: this is a fill event, deduplicate by tradeId
         /// - When tradeId is empty and state=filled: this is a market order close event
+        /// - When tradeId is empty and state=canceled: OKX canceled the order server-side
         /// - Duplicate messages may be pushed (with different uTime), only process first
         /// </summary>
         protected virtual void HandleOrderUpdate(WebSocketOrder order)
         {
             try
             {
-                // --- Filter: only process fill events that belong to this session ---
-                // 1. State changes (no tradeId) are already handled by REST responses
-                // 2. Non-LEAN orders (clOrdId not a positive integer) are not ours
-                // 3. Orders not in cache are from previous sessions (LEAN reuses IDs across sessions)
-                if (string.IsNullOrEmpty(order.TradeId)
-                    || !int.TryParse(order.ClientOrderId ?? "", out var orderId)
+                // --- Filter: only process orders that belong to this session ---
+                if (!int.TryParse(order.ClientOrderId ?? "", out var orderId)
                     || orderId <= 0
                     || !CachedOrderIDs.TryGetValue(orderId, out var leanOrder))
                 {
                     return;
                 }
 
+                // --- Handle server-side cancellation (no tradeId, state=canceled) ---
+                // OKX cancels orders when: price deviates too far from index, order times out, etc.
+                // REST CancelOrder also emits Canceled, so duplicates are possible and harmless.
+                if (string.IsNullOrEmpty(order.TradeId))
+                {
+                    if (order.State == "canceled")
+                    {
+                        OnOrderEvent(new OrderEvent(leanOrder, DateTime.UtcNow, OrderFee.Zero)
+                        {
+                            Status = OrderStatus.Canceled,
+                            Message = $"OKX canceled order server-side (ordId: {order.OrderId})"
+                        });
+                    }
+                    return;
+                }
+
+                // --- Handle fill events (tradeId present) ---
                 // Deduplicate by tradeId - per OKX docs, for the same tradeId, only process first message
                 var now = DateTime.UtcNow;
                 if (_processedTradeIds.TryGetValue(order.TradeId, out var expiry) && now < expiry)
