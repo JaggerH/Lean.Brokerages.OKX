@@ -1184,6 +1184,101 @@ public class OKXRiskLimitHelper
 | 51000 | 订单参数错误 | 记录错误，返回 false |
 | 51001 | 余额不足 | 记录警告，返回 false |
 | 51008 | 订单不存在 | 返回 false |
+| 54000 | 保证金交易不支持 | 记录错误，返回 false |
+| 54001 | 仅多币种保证金账户支持自动借币 | 记录错误，返回 false |
+| 54031 | **平台级**持仓限额已达上限（见 12.3） | 记录警告，返回 false（可稍后重试） |
+
+### 12.1.1 持仓限额相关错误码（54xxx 范围）
+
+54xxx 范围错误码主要涉及**保证金交易和合约持仓限制**：
+
+| 错误码 | 错误消息示例 | 说明 |
+|-------|------------|------|
+| 54000 | Margin trading is not supported | 该币种不支持保证金交易 |
+| 54001 | Only Multi-currency margin account can be set to borrow coins automatically | 自动借币仅限多币种保证金模式 |
+| 54004 | Order placement or modification failed because one of the orders in the batch failed | 批量下单中某个订单失败导致整批失败 |
+| 54005 | Switch to isolated margin mode to trade pre-market expiry futures | 盘前到期合约需切换至逐仓模式 |
+| 54006 | Pre-market expiry future position limit is %s contracts | 盘前到期合约持仓上限 |
+| 54007 | Instrument %s is not supported | 不支持该交易品种 |
+| 54031 | Order failed. The {amount} USD open position limit for {instId} has been reached | **平台级合约持仓限额已达上限**（详见 12.3）— 全平台所有用户的总持仓达到上限，非用户个人限额 |
+
+### 12.3 合约持仓限额机制（Position Limits）
+
+#### 12.3.1 概述
+
+OKX 对 SWAP（永续合约）和 FUTURES（交割合约）实施**两层持仓限额规则**，防止市场操纵和风险集中。
+
+#### 12.3.2 两层限额机制
+
+**1. 平台级限额 (`maxPlatOILmt`) — 54031 错误的主要触发原因**
+
+当**全平台所有用户**在某合约上的总持仓 USD 价值达到 `maxPlatOILmt` 时，
+**所有用户**都无法再开新仓，与个人持仓大小无关。系统返回 **sCode: 54031**。
+
+**实际案例：** MAGIC-USDT-SWAP 的平台级限额为 $2,100,000 USD。
+即使你个人持仓为 0、资金远低于该金额，只要全平台其他用户的总持仓已达此上限，
+你的开仓订单也会被拒绝。这在小市值合约上尤其常见。
+
+**2. 用户级限额 (`posLmtAmt` / `posLmtPct`)**
+
+当单个用户（主账户 + 所有子账户共享）的持仓 + 挂单超过用户级限额时，
+该用户的新开仓订单被拒绝。
+
+```
+用户级有效限额 = max(posLmtAmt, oiUSD × posLmtPct)
+```
+
+- **posLmtAmt**: 该合约每用户固定 USD 限额
+- **posLmtPct**: 用户可持有的平台总持仓百分比上限（如 30 表示 30%）
+- **oiUSD**: 平台当前该合约的总持仓 USD 价值
+
+**共同规则：**
+- 仅限制**同方向**的持仓和挂单（多/空分别计算）
+- **reduce-only 订单不受限制**（即使达到限额仍可平仓）
+- 限额基于合约名义价值（USD），非合约张数
+
+#### 12.3.3 API 查询持仓限额参数
+
+**Get Instruments 端点** (`/api/v5/public/instruments`) 返回以下字段：
+
+| 字段 | 说明 | 适用品种 |
+|------|------|---------|
+| `posLmtAmt` | 用户级最大持仓价值 (USD) | SWAP, FUTURES |
+| `posLmtPct` | 用户可持有的平台总持仓百分比 | SWAP, FUTURES |
+| `maxPlatOILmt` | **平台级**最大持仓价值 (USD) — 54031 的触发阈值 | SWAP, FUTURES |
+
+**⚠️ 重要发现（2026-02-23 实测）：** 上述字段对部分合约返回**空字符串**，
+包括 MAGIC-USDT-SWAP 和 BTC-USDT-SWAP。即使实际存在 $2,100,000 的平台级限额，
+`maxPlatOILmt` 字段也是空的。限额值仅在下单被拒时通过 `sMsg` 错误消息暴露。
+
+**可用的替代查询：**
+- `/api/v5/public/open-interest?instId=MAGIC-USDT-SWAP` — 查询当前全平台 OI（如 oiUsd: $559,698）
+- `/api/v5/public/position-tiers?instType=SWAP&instFamily=MAGIC-USDT&tdMode=cross` — 查询杠杆/保证金梯度（87 档）
+- 但这些**都无法提前知道平台级开仓限额**
+
+**结论：** Brokerage 无法预判 54031，只能在下单失败后从 sMsg 中解析。
+
+#### 12.3.4 Brokerage 处理建议
+
+遇到 54031 错误时：
+1. 记录警告日志（包含合约名称和限额值）
+2. 返回 `false`（本次不可成功，但**可稍后重试** — 因为是平台级限额，其他用户平仓后限额会释放）
+3. 触发 `BrokerageMessageEvent(Warning)` 通知算法
+4. 算法策略选项：
+   - 等待后重试（平台总持仓可能因其他用户平仓而降低）
+   - 切换到限额更高的替代合约
+   - 跳过该信号
+
+#### 12.3.5 信息源
+
+- [OKX Position Limits of Contracts](https://www.okx.com/en-us/help/position-limits-of-contracts) — 限额规则总览
+- [OKX to Apply Position Limits on Futures Contracts](https://www.okx.com/help/okx-to-apply-position-limits-on-futures-contracts) — 2025-04 实施公告
+- [OKX API Get Instruments](https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments) — `posLmtAmt`, `posLmtPct`, `maxPlatOILmt` 字段
+- [OKX API Changelog 2025-10-23](https://www.okx.com/docs-v5/log_en/) — 新增 posLmtAmt/posLmtPct/maxPlatOILmt 参数
+- [OKX Trading Rules (SWAP)](https://www.okx.com/trade-market/info/swap) — 各合约实时参数
+- [OKX Position Tiers](https://www.okx.com/trade-market/position/swap) — 各合约持仓梯度详情
+
+---
 
 ### 12.2 错误处理示例
 
