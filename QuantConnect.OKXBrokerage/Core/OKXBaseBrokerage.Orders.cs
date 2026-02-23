@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
@@ -27,11 +28,6 @@ namespace QuantConnect.Brokerages.OKX
     /// </summary>
     public abstract partial class OKXBaseBrokerage
     {
-        /// <summary>
-        /// Default price buffer for converting market buy orders to FOK limit orders (0.3%)
-        /// </summary>
-        private const decimal DefaultMarketBuyPriceBuffer = 0.003m;
-
         // ========================================
         // ORDER ROUTING
         // ========================================
@@ -138,36 +134,21 @@ namespace QuantConnect.Brokerages.OKX
         ///
         /// <para><b>Price calculation:</b></para>
         /// <para>
-        /// limitPrice = BestAskPrice × (1 + buffer), where buffer defaults to 2%.
-        /// This ensures immediate execution while protecting against excessive slippage.
+        /// Walks orderbook ask levels to find the worst price needed to fill order.Quantity,
+        /// then caps at OKX buyLmt (price limit) if enabled.
         /// </para>
         /// </summary>
         private Messages.PlaceOrderRequest BuildSpotMarketBuyAsFokLimitRequest(Order order, string instId, string tdMode)
         {
-            var bestAsk = 0m;
-
-            // Try local order book first (zero-latency, already synchronized)
-            if (_orderBooks.TryGetValue(order.Symbol, out var orderBook))
+            if (!_orderBooks.TryGetValue(order.Symbol, out var orderBook))
             {
-                bestAsk = orderBook.BestAskPrice;
+                throw new InvalidOperationException($"No order book available for {instId}");
             }
 
-            // Fall back to REST ticker only if order book has no data
-            if (bestAsk <= 0)
-            {
-                var ticker = RestApiClient.GetTicker(instId)?.FirstOrDefault();
-                bestAsk = ticker?.LowestAsk ?? 0m;
-            }
+            var limitPrice = CalculateFokLimitPrice(orderBook, order.Symbol, Math.Abs(order.Quantity));
 
-            if (bestAsk <= 0)
-            {
-                throw new InvalidOperationException($"No price data available for {instId}");
-            }
-
-            var priceBuffer = DefaultMarketBuyPriceBuffer;
-            var limitPrice = bestAsk * (1 + priceBuffer);
-
-            Log.Trace($"OKXBaseBrokerage.BuildSpotMarketBuyAsFokLimitRequest(): {instId} bestAsk={bestAsk}, limitPrice={limitPrice} (buffer={priceBuffer:P0})");
+            Log.Trace($"OKXBaseBrokerage.BuildSpotMarketBuyAsFokLimitRequest(): " +
+                $"{instId} qty={Math.Abs(order.Quantity)} limitPrice={limitPrice}");
 
             return new Messages.PlaceOrderRequest
             {
@@ -180,6 +161,43 @@ namespace QuantConnect.Brokerages.OKX
                 ClientOrderId = order.Id.ToStringInvariant(),
                 Tag = HashOrderTag(order.Tag)
             };
+        }
+
+        /// <summary>
+        /// Calculates FOK limit price by walking orderbook depth to cover the required quantity.
+        /// Takes the worst (highest) ask price needed, then caps at OKX buyLmt if enabled.
+        /// </summary>
+        public decimal CalculateFokLimitPrice(OKXOrderBook orderBook, Symbol symbol, decimal quantity)
+        {
+            var asks = orderBook.GetAsks().ToList();
+
+            if (asks.Count == 0)
+            {
+                throw new InvalidOperationException($"No ask levels in order book for {symbol}");
+            }
+
+            var accumulated = 0m;
+            var worstPrice = asks[0].Key;
+
+            foreach (var level in asks)
+            {
+                worstPrice = level.Key;
+                accumulated += level.Value;
+                if (accumulated >= quantity) break;
+            }
+
+            // Apply PriceLimit ceiling
+            var limit = _priceLimitSync?.GetState(symbol);
+            if (limit?.Enabled == true)
+            {
+                var buyLmt = ParseHelper.ParseDecimal(limit.BuyLimit);
+                if (buyLmt > 0 && worstPrice > buyLmt)
+                {
+                    worstPrice = buyLmt;
+                }
+            }
+
+            return worstPrice;
         }
 
         // ========================================

@@ -14,10 +14,12 @@
 */
 
 using NUnit.Framework;
+using PriceLimit = QuantConnect.Brokerages.OKX.Messages.PriceLimit;
 using QuantConnect.Configuration;
 using QuantConnect.Orders;
 using QuantConnect.Securities;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -472,6 +474,177 @@ namespace QuantConnect.Brokerages.OKX.Tests
             // Assert - Should handle gracefully (return false or throw handled exception)
             // Note: Actual behavior depends on symbol mapper
             Console.WriteLine($"Invalid symbol order result: {result}");
+        }
+
+        #endregion
+
+        #region FOK Pricing Tests
+
+        /// <summary>
+        /// Creates an OKXOrderBook with the given ask levels.
+        /// </summary>
+        private static OKXOrderBook CreateOrderBookWithAsks(Symbol symbol, params (string price, string size)[] asks)
+        {
+            var orderBook = new OKXOrderBook(symbol);
+            var askLevels = asks.Select(a => new List<string> { a.price, a.size }).ToList();
+            orderBook.ApplyFullSnapshot(new List<List<string>>(), askLevels);
+            return orderBook;
+        }
+
+        /// <summary>
+        /// Creates a TestableOKXBrokerage with injected orderbook and optional PriceLimit.
+        /// </summary>
+        private static FokTestableOKXBrokerage CreateFokTestBrokerage(
+            Symbol symbol,
+            OKXOrderBook orderBook,
+            PriceLimit priceLimit = null)
+        {
+            var brokerage = new FokTestableOKXBrokerage();
+            brokerage.CreatePriceLimitSynchronizer();
+
+            if (orderBook != null)
+            {
+                brokerage.OrderBooks[symbol] = orderBook;
+            }
+
+            if (priceLimit != null)
+            {
+                var sync = brokerage.PriceLimitSync.GetSynchronizer(symbol);
+                sync.SetStateSilent(priceLimit);
+            }
+
+            return brokerage;
+        }
+
+        [Test]
+        public void FokPrice_SingleLevel_Sufficient()
+        {
+            var symbol = Symbol.Create("XRPUSDT", SecurityType.Crypto, Market.OKX);
+            var orderBook = CreateOrderBookWithAsks(symbol, ("0.500", "50"));
+            var brokerage = CreateFokTestBrokerage(symbol, orderBook);
+
+            var result = brokerage.CalculateFokLimitPrice(orderBook, symbol, 30m);
+
+            Assert.AreEqual(0.500m, result);
+        }
+
+        [Test]
+        public void FokPrice_MultiLevel_Walk()
+        {
+            var symbol = Symbol.Create("XRPUSDT", SecurityType.Crypto, Market.OKX);
+            var orderBook = CreateOrderBookWithAsks(symbol,
+                ("0.500", "50"), ("0.502", "100"), ("0.510", "500"));
+            var brokerage = CreateFokTestBrokerage(symbol, orderBook);
+
+            var result = brokerage.CalculateFokLimitPrice(orderBook, symbol, 120m);
+
+            Assert.AreEqual(0.502m, result);
+        }
+
+        [Test]
+        public void FokPrice_ExactBoundary()
+        {
+            var symbol = Symbol.Create("XRPUSDT", SecurityType.Crypto, Market.OKX);
+            var orderBook = CreateOrderBookWithAsks(symbol,
+                ("0.500", "50"), ("0.502", "100"));
+            var brokerage = CreateFokTestBrokerage(symbol, orderBook);
+
+            var result = brokerage.CalculateFokLimitPrice(orderBook, symbol, 50m);
+
+            Assert.AreEqual(0.500m, result);
+        }
+
+        [Test]
+        public void FokPrice_InsufficientDepth_UsesDeepest()
+        {
+            var symbol = Symbol.Create("XRPUSDT", SecurityType.Crypto, Market.OKX);
+            var orderBook = CreateOrderBookWithAsks(symbol,
+                ("0.500", "50"), ("0.502", "100"));
+            var brokerage = CreateFokTestBrokerage(symbol, orderBook);
+
+            var result = brokerage.CalculateFokLimitPrice(orderBook, symbol, 200m);
+
+            Assert.AreEqual(0.502m, result);
+        }
+
+        [Test]
+        public void FokPrice_EmptyAsks_Throws()
+        {
+            var symbol = Symbol.Create("XRPUSDT", SecurityType.Crypto, Market.OKX);
+            var orderBook = CreateOrderBookWithAsks(symbol); // no asks
+            var brokerage = CreateFokTestBrokerage(symbol, orderBook);
+
+            Assert.Throws<InvalidOperationException>(() =>
+                brokerage.CalculateFokLimitPrice(orderBook, symbol, 100m));
+        }
+
+        [Test]
+        public void FokPrice_NoOrderBook_Throws()
+        {
+            var symbol = Symbol.Create("XRPUSDT", SecurityType.Crypto, Market.OKX);
+            var brokerage = CreateFokTestBrokerage(symbol, null); // no orderbook
+
+            // CalculateFokLimitPrice itself won't throw for no orderbook —
+            // that's BuildSpotMarketBuyAsFokLimitRequest's job.
+            // But we verify the orderbook is not in _orderBooks.
+            Assert.IsFalse(brokerage.OrderBooks.ContainsKey(symbol));
+        }
+
+        [Test]
+        public void FokPrice_PriceLimit_Truncates()
+        {
+            var symbol = Symbol.Create("XRPUSDT", SecurityType.Crypto, Market.OKX);
+            var orderBook = CreateOrderBookWithAsks(symbol,
+                ("0.500", "50"), ("0.502", "100"), ("0.510", "500"));
+            var priceLimit = new PriceLimit { BuyLimit = "0.508", SellLimit = "0.400", Enabled = true };
+            var brokerage = CreateFokTestBrokerage(symbol, orderBook, priceLimit);
+
+            // qty=200 walks to 0.510, but buyLmt=0.508 truncates
+            var result = brokerage.CalculateFokLimitPrice(orderBook, symbol, 200m);
+
+            Assert.AreEqual(0.508m, result);
+        }
+
+        [Test]
+        public void FokPrice_PriceLimit_NoLimit()
+        {
+            var symbol = Symbol.Create("XRPUSDT", SecurityType.Crypto, Market.OKX);
+            var orderBook = CreateOrderBookWithAsks(symbol,
+                ("0.500", "50"), ("0.502", "100"), ("0.510", "500"));
+            var priceLimit = new PriceLimit { BuyLimit = "0.520", SellLimit = "0.400", Enabled = true };
+            var brokerage = CreateFokTestBrokerage(symbol, orderBook, priceLimit);
+
+            // qty=200 walks to 0.510, buyLmt=0.520 does not constrain
+            var result = brokerage.CalculateFokLimitPrice(orderBook, symbol, 200m);
+
+            Assert.AreEqual(0.510m, result);
+        }
+
+        [Test]
+        public void FokPrice_PriceLimit_Disabled()
+        {
+            var symbol = Symbol.Create("XRPUSDT", SecurityType.Crypto, Market.OKX);
+            var orderBook = CreateOrderBookWithAsks(symbol,
+                ("0.500", "50"), ("0.502", "100"), ("0.510", "500"));
+            var priceLimit = new PriceLimit { BuyLimit = "0.508", SellLimit = "0.400", Enabled = false };
+            var brokerage = CreateFokTestBrokerage(symbol, orderBook, priceLimit);
+
+            // qty=200 walks to 0.510, PriceLimit disabled → no truncation
+            var result = brokerage.CalculateFokLimitPrice(orderBook, symbol, 200m);
+
+            Assert.AreEqual(0.510m, result);
+        }
+
+        /// <summary>
+        /// Minimal concrete subclass exposing internals for FOK pricing tests.
+        /// </summary>
+        private class FokTestableOKXBrokerage : OKXBaseBrokerage
+        {
+            public BrokerageMultiStateSynchronizer<Symbol, PriceLimit, PriceLimit> PriceLimitSync => _priceLimitSync;
+            public ConcurrentDictionary<Symbol, OKXOrderBook> OrderBooks => _orderBooks;
+            public new void CreatePriceLimitSynchronizer() => base.CreatePriceLimitSynchronizer();
+            protected override void SubscribePrivateChannels() { }
+            protected override void SendAuthenticationRequest() { }
         }
 
         #endregion
