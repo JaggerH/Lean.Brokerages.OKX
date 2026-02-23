@@ -441,6 +441,16 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// </summary>
         [JsonProperty("tradeId")]
         public string TradeId { get; set; }
+
+        /// <summary>
+        /// Order cancel source. Indicates why the order was canceled.
+        /// Values: 0=system, 1=user, 2=pre-reduce, 3=risk-control, 4=borrow-limit,
+        /// 6=ADL, 7=delivery, 9=funding-fee, 10=option-expiry, 13=FOK-not-filled,
+        /// 14=IOC-partial, 15=price-out-of-range, 17=close-position, 20=countdown,
+        /// 27=slippage-protection, 31=post-only-would-take, 32=self-trade-prevention, etc.
+        /// </summary>
+        [JsonProperty("cancelSource")]
+        public string CancelSource { get; set; }
     }
 
     /// <summary>

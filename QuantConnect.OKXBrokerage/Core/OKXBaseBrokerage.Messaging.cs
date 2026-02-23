@@ -381,10 +381,13 @@ namespace QuantConnect.Brokerages.OKX
                 {
                     if (order.State == "canceled")
                     {
+                        var cancelReason = GetCancelSourceDescription(order.CancelSource);
+                        Log.Trace($"{GetType().Name}.HandleOrderUpdate(): Order canceled - ordId: {order.OrderId}, clOrdId: {order.ClientOrderId}, cancelSource: {order.CancelSource} ({cancelReason})");
+
                         OnOrderEvent(new OrderEvent(leanOrder, DateTime.UtcNow, OrderFee.Zero)
                         {
                             Status = OrderStatus.Canceled,
-                            Message = $"OKX canceled order server-side (ordId: {order.OrderId})"
+                            Message = $"OKX canceled order (ordId: {order.OrderId}, cancelSource: {order.CancelSource} - {cancelReason})"
                         });
                     }
                     return;
@@ -417,6 +420,47 @@ namespace QuantConnect.Brokerages.OKX
             {
                 Log.Error($"{GetType().Name}.HandleOrderUpdate(): Error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Maps OKX cancelSource code to human-readable description
+        /// </summary>
+        private static string GetCancelSourceDescription(string cancelSource)
+        {
+            return cancelSource switch
+            {
+                "0" => "系统撤单",
+                "1" => "用户主动撤单",
+                "2" => "预减仓撤单(保证金不足)",
+                "3" => "风控撤单(爆仓风险)",
+                "4" => "借币量达到平台硬顶",
+                "6" => "ADL撤单(维持保证金率低)",
+                "7" => "交割合约到期",
+                "9" => "扣除资金费后余额不足",
+                "10" => "期权合约到期",
+                "13" => "FOK未完全成交",
+                "14" => "IOC部分成交,剩余撤回",
+                "15" => "委托价不在限价范围内",
+                "17" => "平仓单撤单(仓位已被市价全平)",
+                "20" => "倒计时撤单",
+                "21" => "仓位已平,止盈止损撤销",
+                "22" => "存在更优同方向只减仓订单",
+                "23" => "存在更优同方向只减仓订单(已存在的)",
+                "27" => "成交滑点超5%,差价保护撤单",
+                "31" => "Post-only订单将吃掉挂单深度",
+                "32" => "自成交保护",
+                "33" => "taker匹配订单数超过最大限制",
+                "36" => "关联止损被触发,撤销限价止盈",
+                "37" => "关联止损被撤销,撤销限价止盈",
+                "38" => "用户撤销MMP类型订单",
+                "39" => "MMP被触发,订单撤销",
+                "42" => "追逐距离达到上限,自动取消",
+                "43" => "买单价高于/卖单价低于指数价格",
+                "44" => "可用余额不足,自动换币触发撤单",
+                "45" => "ELP订单价格校验失败",
+                "46" => "降低Delta导致撤单",
+                _ => $"未知原因({cancelSource})"
+            };
         }
 
         /// <summary>

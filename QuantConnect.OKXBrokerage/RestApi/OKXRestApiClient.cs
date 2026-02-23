@@ -17,6 +17,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Newtonsoft.Json;
 using QuantConnect.Brokerages.OKX.Converters;
 using QuantConnect.Brokerages.OKX.Messages;
 using QuantConnect.Brokerages.OKX.RestApi;
@@ -671,6 +672,9 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 "/trade/order",
                 request,
                 defaultValue: null);
+
+            // Always log full response JSON for diagnostics
+            Log.Trace($"OKXRestApiClient.PlaceOrder(): Response: {JsonConvert.SerializeObject(response)}");
 
             if (response?.Data == null || response.Data.Count == 0)
             {
