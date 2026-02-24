@@ -616,7 +616,6 @@ namespace QuantConnect.Brokerages.OKX
 
                 // Clean up order book synchronizer state
                 _orderBookSync?.RemoveState(symbol);
-                _orderBooks.TryRemove(symbol, out _);
 
                 // Clean up price limit sync state
                 _priceLimitSync?.RemoveState(symbol);

@@ -580,6 +580,31 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         }
 
         /// <summary>
+        /// Gets order book snapshot for a specific instrument via OKX v5 API
+        /// https://www.okx.com/docs-v5/en/#order-book-trading-market-data-get-order-book
+        /// No authentication required
+        /// </summary>
+        /// <param name="instId">Instrument ID (e.g., BTC-USDT)</param>
+        /// <param name="depth">Number of levels (max 400, default 400)</param>
+        /// <returns>Order book snapshot, or null if request fails</returns>
+        public WebSocketOrderBook GetOrderBook(string instId, int depth = 400)
+        {
+            var queryString = $"instId={instId}&sz={Math.Min(depth, 400)}";
+            var response = GetPublic<OKXApiResponse<WebSocketOrderBook>>(
+                "/market/books",
+                queryString,
+                defaultValue: null);
+
+            if (response?.IsSuccess != true || response.Data == null || response.Data.Count == 0)
+            {
+                Log.Error($"OKXRestApiClient.GetOrderBook(): Failed for {instId} - code: {response?.Code}, msg: {response?.Message}");
+                return null;
+            }
+
+            return response.Data[0];
+        }
+
+        /// <summary>
         /// Gets pending orders (unfilled or partially filled) under the current account
         /// https://www.okx.com/docs-v5/en/#rest-api-trade-get-order-list
         /// Requires authentication

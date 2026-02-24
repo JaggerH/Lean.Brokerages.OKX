@@ -71,8 +71,25 @@ namespace QuantConnect.Brokerages.OKX
                 orderBook = new OKXOrderBook(symbol);
                 orderBook.BestBidAskUpdated += EmitBestBidAskUpdated;
                 sync.SetStateSilent(orderBook);
-                _orderBooks[symbol] = orderBook;
             }
+
+            // 2. Fetch full snapshot via REST (works for both init and reinit)
+            var instId = _symbolMapper.GetBrokerageSymbol(symbol);
+            var snapshot = RestApiClient.GetOrderBook(instId);
+            if (snapshot == null)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to fetch REST order book snapshot for {symbol} ({instId})");
+            }
+
+            // 3. Apply snapshot and set sequence baseline
+            orderBook.ApplyFullSnapshot(snapshot.Bids, snapshot.Asks);
+            orderBook.LastUpdateId = snapshot.SequenceId ?? 0;
+
+            // 4. Trigger StateChanged so downstream consumers see the new state
+            sync.SetState(orderBook);
+
+            Log.Trace($"OKXBaseBrokerage.InitializeOrderBookAsync(): {symbol} initialized via REST snapshot, seqId={orderBook.LastUpdateId}");
         }
 
         /// <summary>
@@ -119,6 +136,12 @@ namespace QuantConnect.Brokerages.OKX
             var expectedPrevSeqId = current.LastUpdateId;
             var actualPrevSeqId = update.PreviousSequenceId.Value;
             var currentSeqId = update.SequenceId.Value;
+
+            // Skip messages older than or equal to the REST snapshot baseline
+            if (currentSeqId <= expectedPrevSeqId && expectedPrevSeqId > 0)
+            {
+                return null;
+            }
 
             // Validate sequence continuity
             if (actualPrevSeqId != expectedPrevSeqId && expectedPrevSeqId > 0)
@@ -205,7 +228,7 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         private void OnOrderBookError(object sender, KeyedErrorEventArgs<Symbol> e)
         {
-            Log.Trace($"{GetType().Name}.OnOrderBookError(): {e.Key} - {e.Exception.Message}");
+            Log.Error($"{GetType().Name}.OnOrderBookError(): {e.Key} - {e.Exception.Message}");
 
             var sync = _orderBookSync?.GetSynchronizer(e.Key);
             if (sync == null)

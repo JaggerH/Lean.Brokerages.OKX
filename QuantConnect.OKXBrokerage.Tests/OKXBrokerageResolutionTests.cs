@@ -234,13 +234,13 @@ namespace QuantConnect.Brokerages.OKX.Tests
             // Wait for initial orderbook
             var orderBook = WaitForOrderBook(symbol, 30);
             Assert.IsNotNull(orderBook, "OrderBook should be initialized within 30 seconds");
-            Log.Trace($"[OK] Initial OrderBook: Bid={FmtPrice(orderBook.BestBidPrice)}, Ask={FmtPrice(orderBook.BestAskPrice)}");
+            Log.Trace($"[OK] Initial OrderBook: Bid={FmtPrice(orderBook.BestBidPrice)}, Ask={FmtPrice(orderBook.BestAskPrice)}, SeqId={orderBook.LastUpdateId}");
             Log.Trace("");
 
             // Table header
-            Log.Trace("+--------+-----------+----------------+----------------+----------------+----------------+-------+");
-            Log.Trace("| Update |   Time    |   Bid Price    |   Bid Size     |   Ask Price    |   Ask Size     | Depth |");
-            Log.Trace("+--------+-----------+----------------+----------------+----------------+----------------+-------+");
+            Log.Trace("+--------+-----------+----------------+----------------+----------------+----------------+-------+----------------+");
+            Log.Trace("| Update |   Time    |   Bid Price    |   Bid Size     |   Ask Price    |   Ask Size     | Depth |     SeqId      |");
+            Log.Trace("+--------+-----------+----------------+----------------+----------------+----------------+-------+----------------+");
 
             // Collect updates
             while (updateCount < maxUpdates && DateTime.UtcNow < timeoutTime)
@@ -258,8 +258,10 @@ namespace QuantConnect.Brokerages.OKX.Tests
                     var askPrice = ob.Asks.Count > 0 ? ob.Asks[0].Price : 0m;
                     var askSize = ob.Asks.Count > 0 ? ob.Asks[0].Size : 0m;
                     var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
+                    var currentOb = GetBrokerageOrderBook(symbol);
+                    var seqId = currentOb?.LastUpdateId ?? 0;
 
-                    Log.Trace($"| {updateCount,6} | {elapsed,8:F2}s | {FmtPrice(bidPrice),14} | {FmtPrice(bidSize),14} | {FmtPrice(askPrice),14} | {FmtPrice(askSize),14} | {ob.Levels,5} |");
+                    Log.Trace($"| {updateCount,6} | {elapsed,8:F2}s | {FmtPrice(bidPrice),14} | {FmtPrice(bidSize),14} | {FmtPrice(askPrice),14} | {FmtPrice(askSize),14} | {ob.Levels,5} | {seqId,14} |");
 
                     // Basic validation
                     Assert.Greater(bidPrice, 0, "Bid price should be positive");
@@ -270,7 +272,7 @@ namespace QuantConnect.Brokerages.OKX.Tests
                 Thread.Sleep(100);
             }
 
-            Log.Trace("+--------+-----------+----------------+----------------+----------------+----------------+-------+");
+            Log.Trace("+--------+-----------+----------------+----------------+----------------+----------------+-------+----------------+");
             Log.Trace("");
 
             // Summary
@@ -280,9 +282,11 @@ namespace QuantConnect.Brokerages.OKX.Tests
             lock (_dataLock)
             {
                 var lastOb = _receivedOrderbooks.Last();
+                var finalOb = GetBrokerageOrderBook(symbol);
+                var finalSeqId = finalOb?.LastUpdateId ?? 0;
                 Log.Trace($"===== Summary =====");
                 Log.Trace($"Updates: {updateCount}, Duration: {totalElapsed:F2}s, Rate: {updateCount / totalElapsed:F2}/s");
-                Log.Trace($"Last: Bid={FmtPrice(lastOb.Bids[0].Price)} x {FmtPrice(lastOb.Bids[0].Size)}, Ask={FmtPrice(lastOb.Asks[0].Price)} x {FmtPrice(lastOb.Asks[0].Size)}, Levels={lastOb.Levels}");
+                Log.Trace($"Last: Bid={FmtPrice(lastOb.Bids[0].Price)} x {FmtPrice(lastOb.Bids[0].Size)}, Ask={FmtPrice(lastOb.Asks[0].Price)} x {FmtPrice(lastOb.Asks[0].Size)}, Levels={lastOb.Levels}, SeqId={finalSeqId}");
             }
 
             // Cleanup

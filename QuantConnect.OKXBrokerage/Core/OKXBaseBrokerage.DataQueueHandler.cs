@@ -36,11 +36,6 @@ namespace QuantConnect.Brokerages.OKX
         // ========================================
 
         /// <summary>
-        /// Order book management for each symbol
-        /// </summary>
-        protected readonly ConcurrentDictionary<Symbol, OKXOrderBook> _orderBooks = new();
-
-        /// <summary>
         /// Order book depth configuration for books channel (400 levels)
         /// Matches OKX v5 API books channel specification
         /// </summary>
@@ -196,7 +191,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <returns>The order book if available, null otherwise</returns>
         public OKXOrderBook GetOrderBook(Symbol symbol)
         {
-            return _orderBooks.TryGetValue(symbol, out var orderBook) ? orderBook : null;
+            return _orderBookSync?.GetState(symbol);
         }
 
         /// <summary>
@@ -214,7 +209,7 @@ namespace QuantConnect.Brokerages.OKX
             bestBid = bestAsk = bidSize = askSize = 0;
 
             // First, try to get data from order book (full depth - preferred when available)
-            if (_orderBooks.TryGetValue(symbol, out var orderBook))
+            if (_orderBookSync != null && _orderBookSync.TryGetState(symbol, out var orderBook))
             {
                 bestBid = orderBook.BestBidPrice;
                 bestAsk = orderBook.BestAskPrice;

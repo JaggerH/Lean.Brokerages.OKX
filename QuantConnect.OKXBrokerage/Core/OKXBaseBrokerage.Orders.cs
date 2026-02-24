@@ -140,9 +140,16 @@ namespace QuantConnect.Brokerages.OKX
         /// </summary>
         private Messages.PlaceOrderRequest BuildSpotMarketBuyAsFokLimitRequest(Order order, string instId, string tdMode)
         {
-            if (!_orderBooks.TryGetValue(order.Symbol, out var orderBook))
+            if (_orderBookSync == null || !_orderBookSync.TryGetState(order.Symbol, out var orderBook))
             {
-                throw new InvalidOperationException($"No order book available for {instId}");
+                // Fallback: fetch orderbook snapshot via REST when WS subscription is not active
+                var snapshot = RestApiClient.GetOrderBook(instId);
+                if (snapshot == null || (snapshot.Asks?.Count ?? 0) == 0)
+                {
+                    throw new InvalidOperationException($"No order book available for {instId}");
+                }
+                orderBook = new OKXOrderBook(order.Symbol);
+                orderBook.ApplyFullSnapshot(snapshot.Bids, snapshot.Asks);
             }
 
             var limitPrice = CalculateFokLimitPrice(orderBook, order.Symbol, Math.Abs(order.Quantity));

@@ -501,10 +501,12 @@ namespace QuantConnect.Brokerages.OKX.Tests
         {
             var brokerage = new FokTestableOKXBrokerage();
             brokerage.CreatePriceLimitSynchronizer();
+            brokerage.CreateOrderBookSynchronizer();
 
             if (orderBook != null)
             {
-                brokerage.OrderBooks[symbol] = orderBook;
+                var sync = brokerage.OrderBookSync.GetSynchronizer(symbol);
+                sync.SetStateSilent(orderBook);
             }
 
             if (priceLimit != null)
@@ -586,8 +588,8 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
             // CalculateFokLimitPrice itself won't throw for no orderbook —
             // that's BuildSpotMarketBuyAsFokLimitRequest's job.
-            // But we verify the orderbook is not in _orderBooks.
-            Assert.IsFalse(brokerage.OrderBooks.ContainsKey(symbol));
+            // But we verify the orderbook is not in _orderBookSync.
+            Assert.IsNull(brokerage.OrderBookSync.GetState(symbol));
         }
 
         [Test]
@@ -641,8 +643,9 @@ namespace QuantConnect.Brokerages.OKX.Tests
         private class FokTestableOKXBrokerage : OKXBaseBrokerage
         {
             public BrokerageMultiStateSynchronizer<Symbol, PriceLimit, PriceLimit> PriceLimitSync => _priceLimitSync;
-            public ConcurrentDictionary<Symbol, OKXOrderBook> OrderBooks => _orderBooks;
+            public BrokerageMultiStateSynchronizer<Symbol, OKXOrderBook, Messages.WebSocketOrderBook> OrderBookSync => _orderBookSync;
             public new void CreatePriceLimitSynchronizer() => base.CreatePriceLimitSynchronizer();
+            public new void CreateOrderBookSynchronizer() => base.CreateOrderBookSynchronizer();
             protected override void SubscribePrivateChannels() { }
             protected override void SendAuthenticationRequest() { }
         }
