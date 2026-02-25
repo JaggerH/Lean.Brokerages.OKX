@@ -45,20 +45,21 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Fetches recent trades from /market/trades, trimmed by request time range.
-        /// OKX limit: max 500 recent trades, no pagination.
+        /// Fetches recent trades from /market/trades.
+        /// OKX returns up to 500 most recent trades (newest-first, no time-based pagination).
+        /// We sort ascending and return all trades without time filtering.
         /// </summary>
         private IEnumerable<BaseData> GetTradeHistory(HistoryRequest request)
         {
             var instId = _symbolMapper.GetBrokerageSymbol(request.Symbol);
+            var trades = RestApiClient.GetTrades(instId, 500);
 
-            foreach (var trade in RestApiClient.GetTrades(instId, 500))
+            // OKX returns trades newest-first; sort ascending so LEAN processes them chronologically
+            trades.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
+
+            foreach (var trade in trades)
             {
-                var time = DateTimeOffset.FromUnixTimeMilliseconds(trade.Timestamp).UtcDateTime;
-                if (time >= request.StartTimeUtc && time <= request.EndTimeUtc)
-                {
-                    yield return trade.ToTick(_symbolMapper, request.Symbol.SecurityType);
-                }
+                yield return trade.ToTick(_symbolMapper, request.Symbol.SecurityType);
             }
         }
 

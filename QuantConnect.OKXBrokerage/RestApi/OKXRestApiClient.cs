@@ -38,6 +38,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         private readonly RateGate _candlesRateLimiter;  // /market/candles: 40 requests per 2 seconds
         private readonly RateGate _tradesRateLimiter;   // /market/trades: 100 requests per 2 seconds
         private readonly RateGate _priceLimitRateLimiter;  // /public/price-limit: 20 requests per 2 seconds
+        private readonly RateGate _orderBookRateLimiter;  // /market/books: 40 requests per 2 seconds
 
         /// <summary>
         /// API prefix for OKX unified account (/api/v5)
@@ -67,6 +68,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             _candlesRateLimiter = new RateGate(40, TimeSpan.FromSeconds(2));
             _tradesRateLimiter = new RateGate(100, TimeSpan.FromSeconds(2));
             _priceLimitRateLimiter = new RateGate(20, TimeSpan.FromSeconds(2));
+            _orderBookRateLimiter = new RateGate(40, TimeSpan.FromSeconds(2));
         }
 
         /// <summary>
@@ -589,6 +591,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// <returns>Order book snapshot, or null if request fails</returns>
         public WebSocketOrderBook GetOrderBook(string instId, int depth = 400)
         {
+            _orderBookRateLimiter?.WaitToProceed();
             var queryString = $"instId={instId}&sz={Math.Min(depth, 400)}";
             var response = GetPublic<OKXApiResponse<WebSocketOrderBook>>(
                 "/market/books",
