@@ -88,13 +88,17 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                 var result = new List<CashAmount>();
                 foreach (var detail in balanceData.Details)
                 {
-                    if (string.IsNullOrEmpty(detail.AvailableBalance))
+                    // Use cashBal (cash balance) instead of availBal (available balance).
+                    // In portfolio margin mode, availBal is near-zero because holdings are
+                    // frozen as margin collateral. cashBal reflects actual held quantities.
+                    var balanceStr = detail.CashBalance;
+                    if (string.IsNullOrEmpty(balanceStr))
                         continue;
 
-                    if (decimal.TryParse(detail.AvailableBalance, NumberStyles.Any, CultureInfo.InvariantCulture, out var availBalance) &&
-                        availBalance > 0)
+                    if (decimal.TryParse(balanceStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var cashBalance) &&
+                        cashBalance > 0)
                     {
-                        result.Add(new CashAmount(availBalance, detail.Currency));
+                        result.Add(new CashAmount(cashBalance, detail.Currency));
                     }
                 }
 
