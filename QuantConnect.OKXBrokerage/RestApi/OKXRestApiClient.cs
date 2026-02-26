@@ -809,42 +809,75 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             long? endMs = null,
             int limit = 100)
         {
+            var allFills = new List<Fill>();
+            string afterBillId = null;
+            var pageSize = Math.Min(limit, 100);
+            const int maxPages = 50; // Safety limit to prevent infinite loops
+
             try
             {
-                var queryParams = new List<string>();
-
-                if (!string.IsNullOrEmpty(instType))
-                    queryParams.Add($"instType={instType}");
-
-                if (!string.IsNullOrEmpty(instId))
-                    queryParams.Add($"instId={instId}");
-
-                if (beginMs.HasValue)
-                    queryParams.Add($"begin={beginMs.Value}");
-
-                if (endMs.HasValue)
-                    queryParams.Add($"end={endMs.Value}");
-
-                queryParams.Add($"limit={Math.Min(limit, 100)}");
-
-                var queryString = string.Join("&", queryParams);
-                var response = Get<OKXApiResponse<Fill>>(
-                    "/trade/fills",
-                    queryString,
-                    defaultValue: null);
-
-                if (response == null || !response.IsSuccess)
+                for (var page = 0; page < maxPages; page++)
                 {
-                    Log.Error($"OKXRestApiClient.GetExecutionHistory(): Failed - code: {response?.Code}, msg: {response?.Message}");
-                    return new List<Fill>();
+                    var queryParams = new List<string>();
+
+                    if (!string.IsNullOrEmpty(instType))
+                        queryParams.Add($"instType={instType}");
+
+                    if (!string.IsNullOrEmpty(instId))
+                        queryParams.Add($"instId={instId}");
+
+                    if (beginMs.HasValue)
+                        queryParams.Add($"begin={beginMs.Value}");
+
+                    if (endMs.HasValue)
+                        queryParams.Add($"end={endMs.Value}");
+
+                    // OKX pagination: "after" = return records older than this billId
+                    if (!string.IsNullOrEmpty(afterBillId))
+                        queryParams.Add($"after={afterBillId}");
+
+                    queryParams.Add($"limit={pageSize}");
+
+                    var queryString = string.Join("&", queryParams);
+                    var response = Get<OKXApiResponse<Fill>>(
+                        "/trade/fills",
+                        queryString,
+                        defaultValue: null);
+
+                    if (response == null || !response.IsSuccess)
+                    {
+                        Log.Error($"OKXRestApiClient.GetExecutionHistory(): Failed on page {page} - code: {response?.Code}, msg: {response?.Message}");
+                        break;
+                    }
+
+                    var fills = response.Data;
+                    if (fills == null || fills.Count == 0)
+                        break;
+
+                    allFills.AddRange(fills);
+
+                    // Less than pageSize means we've reached the end
+                    if (fills.Count < pageSize)
+                        break;
+
+                    // Use last record's BillId as cursor for next page
+                    // OKX returns newest first, so last item is the oldest
+                    afterBillId = fills[fills.Count - 1].BillId;
+                    if (string.IsNullOrEmpty(afterBillId))
+                        break;
                 }
 
-                return response.Data ?? new List<Fill>();
+                if (allFills.Count > 100)
+                {
+                    Log.Trace($"OKXRestApiClient.GetExecutionHistory(): Fetched {allFills.Count} fills across multiple pages");
+                }
+
+                return allFills;
             }
             catch (Exception ex)
             {
                 Log.Error($"OKXRestApiClient.GetExecutionHistory(): Exception: {ex.Message}");
-                return new List<Fill>();
+                return allFills; // Return whatever we collected so far
             }
         }
     }
