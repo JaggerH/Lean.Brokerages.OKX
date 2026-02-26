@@ -485,9 +485,11 @@ namespace QuantConnect.Brokerages.OKX
         {
             try
             {
-                // Add 30-second buffer to account for potential timing differences
-                var beginMs = new DateTimeOffset(startTimeUtc).ToUnixTimeMilliseconds() - 30000;
-                var endMs = new DateTimeOffset(endTimeUtc).ToUnixTimeMilliseconds() + 30000;
+                // Safe Window guarantees ±10s no-fill zone around checkpoint.
+                // Begin buffer: -5s covers clock skew without reaching into pre-checkpoint fills.
+                // End buffer: +5s covers clock skew for recent fills near endTimeUtc.
+                var beginMs = new DateTimeOffset(startTimeUtc).ToUnixTimeMilliseconds() - 5000;
+                var endMs = new DateTimeOffset(endTimeUtc).ToUnixTimeMilliseconds() + 5000;
 
                 // Get fills for all instrument types
                 var fills = RestApiClient.GetExecutionHistory(null, null, beginMs, endMs);
