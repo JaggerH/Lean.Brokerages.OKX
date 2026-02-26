@@ -91,12 +91,13 @@ namespace QuantConnect.Brokerages.OKX.RestApi
                     // Use cashBal (cash balance) instead of availBal (available balance).
                     // In portfolio margin mode, availBal is near-zero because holdings are
                     // frozen as margin collateral. cashBal reflects actual held quantities.
+                    // Negative balances are valid in unified margin mode (borrowed USDT).
                     var balanceStr = detail.CashBalance;
                     if (string.IsNullOrEmpty(balanceStr))
                         continue;
 
                     if (decimal.TryParse(balanceStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var cashBalance) &&
-                        cashBalance > 0)
+                        cashBalance != 0)
                     {
                         result.Add(new CashAmount(cashBalance, detail.Currency));
                     }

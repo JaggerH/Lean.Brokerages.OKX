@@ -86,10 +86,17 @@ namespace QuantConnect.Brokerages.OKX.Tests
             {
                 Assert.IsNotNull(cash.Currency, "Currency should not be null");
                 Assert.IsNotEmpty(cash.Currency, "Currency should not be empty");
-                Assert.GreaterOrEqual(cash.Amount, 0, "Cash amount should be non-negative");
+                // Negative balances are valid in unified margin mode (borrowed assets)
+                Assert.That(cash.Amount, Is.Not.EqualTo(0m), "Zero balances should be filtered out");
 
                 Console.WriteLine($"  {cash.Currency}: {cash.Amount}");
             }
+
+            // Verify USDT is present and negative (borrowed in unified margin mode)
+            var usdt = cashBalances.FirstOrDefault(c => c.Currency == "USDT");
+            Console.WriteLine($"\n  USDT balance: {usdt.Amount}");
+            Assert.That(usdt.Amount, Is.LessThan(0),
+                "USDT should be negative when borrowed for spot purchases in unified margin mode");
         }
 
         #endregion
