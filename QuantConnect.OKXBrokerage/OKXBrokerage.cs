@@ -15,12 +15,14 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Newtonsoft.Json;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Securities;
+using QuantConnect.Securities.UnifiedMargin;
 using QuantConnect.Util;
 
 namespace QuantConnect.Brokerages.OKX
@@ -281,10 +283,50 @@ namespace QuantConnect.Brokerages.OKX
                 }
 
                 Log.Trace("OKXBrokerage.ValidateAccountMode(): Account configuration validated successfully");
+
+                // 6. Fetch live fee rates and populate BrokerageFeeCache
+                LoadFeeRates();
             }
             catch (Exception ex) when (!ex.Message.Contains("mismatch") && !ex.Message.Contains("Failed to retrieve") && !ex.Message.Contains("Invalid okx-unified-account-mode"))
             {
                 Log.Error($"OKXBrokerage.ValidateAccountMode(): Warning - {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Fetches live fee rates from OKX and populates <see cref="BrokerageFeeCache"/>.
+        /// Uses SPOT rates for spot fee model and SWAP/makerU/takerU for perpetual fee model.
+        /// Falls back gracefully — fee models use hard-coded defaults if this call fails.
+        /// </summary>
+        private void LoadFeeRates()
+        {
+            try
+            {
+                var spotFee = RestApiClient.GetFeeRates("SPOT");
+                var swapFee = RestApiClient.GetFeeRates("SWAP");
+
+                if (spotFee == null || swapFee == null)
+                {
+                    Log.Error("OKXBrokerage.LoadFeeRates(): Failed to fetch fee rates — using default fee constants");
+                    return;
+                }
+
+                static decimal ParseRate(string raw) =>
+                    Math.Abs(decimal.Parse(raw, CultureInfo.InvariantCulture));
+
+                var spotMaker    = ParseRate(spotFee.Maker);
+                var spotTaker    = ParseRate(spotFee.Taker);
+                var perpMaker    = ParseRate(swapFee.MakerU);
+                var perpTaker    = ParseRate(swapFee.TakerU);
+                var deliveryMaker = !string.IsNullOrEmpty(swapFee.Delivery) ? ParseRate(swapFee.Delivery) : 0m;
+
+                BrokerageFeeCache.Instance.Update(spotMaker, spotTaker, perpMaker, perpTaker, deliveryMaker, deliveryMaker);
+
+                Log.Trace($"OKXBrokerage.LoadFeeRates(): Loaded — Spot maker={spotMaker:P4} taker={spotTaker:P4} | Perp maker={perpMaker:P4} taker={perpTaker:P4} (tier: {spotFee.Level})");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXBrokerage.LoadFeeRates(): Exception — using default fee constants. {ex.Message}");
             }
         }
     }

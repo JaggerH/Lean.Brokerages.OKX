@@ -687,6 +687,39 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             }
         }
 
+        /// <summary>
+        /// Gets the trading fee rates for the current account.
+        /// GET /api/v5/account/trade-fee
+        /// Rate limit: 20 requests per 2 seconds
+        /// Requires authentication
+        /// </summary>
+        /// <param name="instType">Instrument type: SPOT, SWAP, FUTURES, OPTION, MARGIN</param>
+        /// <returns>Fee rate data, or null if request fails</returns>
+        public FeeRate GetFeeRates(string instType)
+        {
+            try
+            {
+                var queryString = $"instType={instType}";
+                var response = Get<OKXApiResponse<FeeRate>>(
+                    "/account/trade-fee",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess || response.Data == null || response.Data.Count == 0)
+                {
+                    Log.Error($"OKXRestApiClient.GetFeeRates(): Failed for {instType} - code: {response?.Code}, msg: {response?.Message}");
+                    return null;
+                }
+
+                return response.Data[0];
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetFeeRates(): Exception: {ex.Message}");
+                return null;
+            }
+        }
+
         // ========================================
         // ORDER MANAGEMENT
         // ========================================
