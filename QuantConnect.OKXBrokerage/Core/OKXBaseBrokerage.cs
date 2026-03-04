@@ -47,7 +47,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Maximum symbols per WebSocket connection
         /// </summary>
-        protected const int MaximumSymbolsPerConnection = 15;
+        protected const int MaximumSymbolsPerConnection = 10;  // 10 symbols × 3 channels = 30 subscriptions (OKX per-connection subscription limit)
 
         /// <summary>
         /// Maps readable account mode names to OKX API acctLv values.
@@ -254,7 +254,7 @@ namespace QuantConnect.Brokerages.OKX
 
             var subscriptionManager = new BrokerageMultiWebSocketSubscriptionManager(
                 publicWssUrl,
-                MaximumSymbolsPerConnection,  // 15 symbols × 2 channels = 30 channels (OKX recommends < 30 for books)
+                MaximumSymbolsPerConnection,  // 10 symbols × 3 channels = 30 subscriptions (OKX per-connection subscription limit)
                 maximumWebSocketConnections,  // From config, default 0 = unlimited
                 null,                         // symbolWeights (null = no weighting)
                 () => new OKXWebSocketWrapper(null),  // WebSocket factory
@@ -672,10 +672,18 @@ namespace QuantConnect.Brokerages.OKX
             try
             {
                 var e = (WebSocketClientWrapper.TextMessage)webSocketMessage.Data;
+                var rawMessage = e.Message;
+
+                // Silently ignore pong/ping responses from public WebSocket connections.
+                // These are OKX responses to the heartbeat pings sent by OKXWebSocketWrapper.
+                // Note: _lastMessageTime is intentionally NOT updated here — that timeout
+                // detection is exclusively for the private WebSocket connection.
+                if (rawMessage == "pong" || rawMessage == "ping")
+                    return;
 
                 // Reuse existing ProcessMessage logic for message parsing and routing
                 // This ensures consistent handling of all message types (errors, subscription confirmations, data updates)
-                ProcessMessage(e.Message);
+                ProcessMessage(rawMessage);
             }
             catch (Exception ex)
             {

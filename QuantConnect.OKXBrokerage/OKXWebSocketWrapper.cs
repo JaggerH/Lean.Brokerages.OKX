@@ -14,17 +14,28 @@
 */
 
 using System;
+using System.Timers;
 using QuantConnect.Interfaces;
+using QuantConnect.Logging;
 
 namespace QuantConnect.Brokerages.OKX
 {
     /// <summary>
-    /// WebSocket wrapper for OKX data connections
-    /// Used by BrokerageMultiWebSocketSubscriptionManager to manage multiple WebSocket connections
-    /// Each wrapper tracks subscribed symbols and provides connection identification
+    /// WebSocket wrapper for OKX public data connections (orderbook/trades/price-limit channels).
+    /// Used by BrokerageMultiWebSocketSubscriptionManager to manage multiple WebSocket connections.
+    /// Each wrapper tracks subscribed symbols, provides connection identification, and manages its
+    /// own heartbeat timer to comply with OKX's 30-second inactivity disconnect requirement.
     /// </summary>
     public class OKXWebSocketWrapper : WebSocketClientWrapper
     {
+        /// <summary>
+        /// OKX requires a client ping every &lt;30 seconds to keep a connection alive.
+        /// 15 seconds provides a comfortable margin below the 30-second timeout.
+        /// </summary>
+        private const int HeartbeatIntervalMs = 15_000;
+
+        private readonly Timer _heartbeatTimer;
+
         /// <summary>
         /// Unique identifier for this WebSocket connection
         /// </summary>
@@ -36,13 +47,40 @@ namespace QuantConnect.Brokerages.OKX
         public IConnectionHandler ConnectionHandler { get; }
 
         /// <summary>
-        /// Creates a new OKX WebSocket wrapper
+        /// Creates a new OKX WebSocket wrapper with a self-contained heartbeat timer.
+        /// The timer starts on Open and stops on Closed, matching the connection lifecycle.
         /// </summary>
         /// <param name="connectionHandler">Optional connection handler</param>
         public OKXWebSocketWrapper(IConnectionHandler connectionHandler)
         {
             ConnectionId = Guid.NewGuid().ToString("N").Substring(0, 8);
             ConnectionHandler = connectionHandler;
+
+            _heartbeatTimer = new Timer(HeartbeatIntervalMs) { AutoReset = true };
+            _heartbeatTimer.Elapsed += OnHeartbeatElapsed;
+
+            Open   += (_, _) => _heartbeatTimer.Start();
+            Closed += (_, _) => _heartbeatTimer.Stop();
+        }
+
+        /// <summary>
+        /// Sends a "ping" to OKX to keep this connection alive.
+        /// OKX responds with "pong" (handled silently by OnDataMessage).
+        /// Skips if the connection is not open (e.g. mid-reconnect).
+        /// </summary>
+        private void OnHeartbeatElapsed(object sender, ElapsedEventArgs e)
+        {
+            if (!IsOpen)
+                return;
+
+            try
+            {
+                Send("ping");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXWebSocketWrapper[{ConnectionId}].Heartbeat(): Error sending ping: {ex.Message}");
+            }
         }
 
         /// <summary>
