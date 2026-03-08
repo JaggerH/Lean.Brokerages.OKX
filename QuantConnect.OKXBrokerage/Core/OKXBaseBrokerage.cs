@@ -598,7 +598,7 @@ namespace QuantConnect.Brokerages.OKX
                     webSocket.Send(JsonConvert.SerializeObject(fundingRateSubscribeMessage));
 
                     // Load initial snapshot asynchronously so we don't block WS message processing
-                    Task.Run(() => LoadInitialFundingRate(brokerageSymbol));
+                    Task.Run(() => LoadInitialFundingRate(symbol));
                 }
 
                 return true;
@@ -614,9 +614,10 @@ namespace QuantConnect.Brokerages.OKX
         /// Fetches the initial funding rate snapshot via REST for a SWAP instrument and writes it to BrokerageDataService.
         /// Called asynchronously from Subscribe() to avoid blocking WS message processing.
         /// </summary>
-        /// <param name="instId">OKX instrument ID, e.g. "BTC-USDT-SWAP".</param>
-        private void LoadInitialFundingRate(string instId)
+        /// <param name="symbol">LEAN symbol for the perpetual instrument.</param>
+        private void LoadInitialFundingRate(Symbol symbol)
         {
+            var instId = _symbolMapper.GetBrokerageSymbol(symbol);
             try
             {
                 var fr = RestApiClient.GetFundingRate(instId);
@@ -625,7 +626,7 @@ namespace QuantConnect.Brokerages.OKX
                     Log.Error($"{GetType().Name}.LoadInitialFundingRate({instId}): No data returned — will rely on WS push");
                     return;
                 }
-                BrokerageDataService.Instance.UpdateFundingRate(instId, fr.ToFundingRate());
+                BrokerageDataService.Instance.UpdateFundingRate(symbol, fr.ToFundingRate());
                 Log.Trace($"{GetType().Name}.LoadInitialFundingRate({instId}): Loaded rate={fr.FundingRateValue}");
             }
             catch (Exception ex)

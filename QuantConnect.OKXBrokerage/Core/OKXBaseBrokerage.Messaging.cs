@@ -344,6 +344,10 @@ namespace QuantConnect.Brokerages.OKX
                 {
                     if (string.IsNullOrEmpty(fr.InstId)) continue;
 
+                    Symbol symbol;
+                    try { symbol = _symbolMapper.GetLeanSymbol(fr.InstId); }
+                    catch { continue; }
+
                     // If nextFundingRate is empty, preserve the existing NextRate rather than overwriting with zero.
                     // Note: TryGetFundingRate + UpdateFundingRate is not atomic; in the rare case where
                     // LoadInitialFundingRate writes between these two calls, the preserved value may be
@@ -351,7 +355,7 @@ namespace QuantConnect.Brokerages.OKX
                     var parsed = fr.ToFundingRate();
                     BrokerageDataService.FundingRate entry;
                     if (string.IsNullOrEmpty(fr.NextFundingRate) &&
-                        BrokerageDataService.Instance.TryGetFundingRate(fr.InstId, out var existing))
+                        BrokerageDataService.Instance.TryGetFundingRate(symbol, out var existing))
                     {
                         entry = new BrokerageDataService.FundingRate
                         {
@@ -367,7 +371,7 @@ namespace QuantConnect.Brokerages.OKX
                         entry = parsed;
                     }
 
-                    BrokerageDataService.Instance.UpdateFundingRate(fr.InstId, entry);
+                    BrokerageDataService.Instance.UpdateFundingRate(symbol, entry);
                 }
             }
             catch (Exception ex)
