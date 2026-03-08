@@ -17,6 +17,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Collections.Concurrent;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using QuantConnect.Brokerages.OKX.Converters;
 using QuantConnect.Brokerages.OKX.RestApi;
@@ -27,6 +28,7 @@ using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Packets;
 using QuantConnect.Securities;
+using QuantConnect.Securities.UnifiedMargin;
 using QuantConnect.TradingPairs;
 using QuantConnect.Util;
 using Timer = System.Timers.Timer;
@@ -47,7 +49,7 @@ namespace QuantConnect.Brokerages.OKX
         /// <summary>
         /// Maximum symbols per WebSocket connection
         /// </summary>
-        protected const int MaximumSymbolsPerConnection = 10;  // 10 symbols × 3 channels = 30 subscriptions (OKX per-connection subscription limit)
+        protected const int MaximumSymbolsPerConnection = 7;   // 7 symbols × 4 channels (books+trades+price-limit+funding-rate) = 28 ≤ 30 (OKX per-connection subscription limit)
 
         /// <summary>
         /// Maps readable account mode names to OKX API acctLv values.
@@ -254,7 +256,7 @@ namespace QuantConnect.Brokerages.OKX
 
             var subscriptionManager = new BrokerageMultiWebSocketSubscriptionManager(
                 publicWssUrl,
-                MaximumSymbolsPerConnection,  // 10 symbols × 3 channels = 30 subscriptions (OKX per-connection subscription limit)
+                MaximumSymbolsPerConnection,  // 7 symbols × 4 channels = 28 ≤ 30 (OKX per-connection subscription limit)
                 maximumWebSocketConnections,  // From config, default 0 = unlimited
                 null,                         // symbolWeights (null = no weighting)
                 () => new OKXWebSocketWrapper(null),  // WebSocket factory
@@ -578,12 +580,57 @@ namespace QuantConnect.Brokerages.OKX
                 };
                 webSocket.Send(JsonConvert.SerializeObject(priceLimitSubscribeMessage));
 
+                // For SWAP symbols, subscribe to funding-rate channel and load initial snapshot via REST
+                if (symbol.SecurityType == SecurityType.CryptoFuture)
+                {
+                    var fundingRateSubscribeMessage = new Messages.WebSocketMessage
+                    {
+                        Operation = "subscribe",
+                        Arguments = new List<object>
+                        {
+                            new Messages.WebSocketChannel
+                            {
+                                Channel = "funding-rate",
+                                InstrumentId = brokerageSymbol
+                            }
+                        }
+                    };
+                    webSocket.Send(JsonConvert.SerializeObject(fundingRateSubscribeMessage));
+
+                    // Load initial snapshot asynchronously so we don't block WS message processing
+                    Task.Run(() => LoadInitialFundingRate(brokerageSymbol));
+                }
+
                 return true;
             }
             catch (Exception ex)
             {
                 Log.Error($"{GetType().Name}.Subscribe({symbol}): {ex}");
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Fetches the initial funding rate snapshot via REST for a SWAP instrument and writes it to BrokerageDataService.
+        /// Called asynchronously from Subscribe() to avoid blocking WS message processing.
+        /// </summary>
+        /// <param name="instId">OKX instrument ID, e.g. "BTC-USDT-SWAP".</param>
+        private void LoadInitialFundingRate(string instId)
+        {
+            try
+            {
+                var fr = RestApiClient.GetFundingRate(instId);
+                if (fr == null)
+                {
+                    Log.Error($"{GetType().Name}.LoadInitialFundingRate({instId}): No data returned — will rely on WS push");
+                    return;
+                }
+                BrokerageDataService.Instance.UpdateFundingRate(instId, fr.ToFundingRate());
+                Log.Trace($"{GetType().Name}.LoadInitialFundingRate({instId}): Loaded rate={fr.FundingRateValue}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.LoadInitialFundingRate({instId}): Exception: {ex.Message}");
             }
         }
 
@@ -651,6 +698,24 @@ namespace QuantConnect.Brokerages.OKX
                     }
                 };
                 webSocket.Send(JsonConvert.SerializeObject(priceLimitUnsubscribeMessage));
+
+                // For SWAP symbols, unsubscribe from funding-rate channel
+                if (symbol.SecurityType == SecurityType.CryptoFuture)
+                {
+                    var fundingRateUnsubscribeMessage = new Messages.WebSocketMessage
+                    {
+                        Operation = "unsubscribe",
+                        Arguments = new List<object>
+                        {
+                            new Messages.WebSocketChannel
+                            {
+                                Channel = "funding-rate",
+                                InstrumentId = brokerageSymbol
+                            }
+                        }
+                    };
+                    webSocket.Send(JsonConvert.SerializeObject(fundingRateUnsubscribeMessage));
+                }
 
                 return true;
             }

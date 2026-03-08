@@ -317,9 +317,62 @@ namespace QuantConnect.Brokerages.OKX
                     HandlePriceLimitChannel(jObject);
                     break;
 
+                case "funding-rate":
+                    HandleFundingRateChannel(jObject);
+                    break;
+
                 default:
                     Log.Trace($"{GetType().Name}: Unknown channel: {channel}");
                     break;
+            }
+        }
+
+        /// <summary>
+        /// Handles funding-rate channel push for SWAP instruments.
+        /// Channel: funding-rate (public)
+        /// Updates BrokerageDataService with the latest funding rate for each instrument in the message.
+        /// When nextFundingRate is an empty string, NextRate is set to zero — callers should preserve the prior value if needed.
+        /// </summary>
+        protected virtual void HandleFundingRateChannel(JObject jObject)
+        {
+            try
+            {
+                var message = jObject.ToObject<WebSocketDataMessage<FundingRate>>();
+                if (message?.Data == null) return;
+
+                foreach (var fr in message.Data)
+                {
+                    if (string.IsNullOrEmpty(fr.InstId)) continue;
+
+                    // If nextFundingRate is empty, preserve the existing NextRate rather than overwriting with zero.
+                    // Note: TryGetFundingRate + UpdateFundingRate is not atomic; in the rare case where
+                    // LoadInitialFundingRate writes between these two calls, the preserved value may be
+                    // one update stale — accepted eventual-consistency trade-off for a predicted rate.
+                    var parsed = fr.ToFundingRate();
+                    BrokerageDataService.FundingRate entry;
+                    if (string.IsNullOrEmpty(fr.NextFundingRate) &&
+                        BrokerageDataService.Instance.TryGetFundingRate(fr.InstId, out var existing))
+                    {
+                        entry = new BrokerageDataService.FundingRate
+                        {
+                            CurrentRate = parsed.CurrentRate,
+                            NextRate = existing.NextRate,
+                            SettlementTime = parsed.SettlementTime,
+                            NextSettlementTime = existing.NextSettlementTime,
+                            UpdatedAt = parsed.UpdatedAt
+                        };
+                    }
+                    else
+                    {
+                        entry = parsed;
+                    }
+
+                    BrokerageDataService.Instance.UpdateFundingRate(fr.InstId, entry);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.HandleFundingRateChannel(): Error: {ex.Message}");
             }
         }
 
@@ -498,8 +551,8 @@ namespace QuantConnect.Brokerages.OKX
             try
             {
                 var marginData = account.ToAccountMarginData();
-                // Update BrokerageMarginCache for MultiCurrencyBuyingPowerModel
-                BrokerageMarginCache.Instance.UpdateAccount(marginData);
+                // Update BrokerageDataService for MultiCurrencyBuyingPowerModel
+                BrokerageDataService.Instance.UpdateMargin(marginData);
             }
             catch (Exception ex)
             {

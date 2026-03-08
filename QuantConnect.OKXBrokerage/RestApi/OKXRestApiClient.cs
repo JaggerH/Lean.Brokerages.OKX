@@ -720,6 +720,67 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             }
         }
 
+        /// <summary>
+        /// Gets the current funding rate for a SWAP instrument (public endpoint, no auth).
+        /// GET /api/v5/public/funding-rate?instId={instId}
+        /// </summary>
+        /// <param name="instId">OKX instrument ID, e.g. "BTC-USDT-SWAP".</param>
+        /// <returns>FundingRate message, or null if the request fails.</returns>
+        public FundingRate GetFundingRate(string instId)
+        {
+            try
+            {
+                var queryString = $"instId={instId}";
+                var response = GetPublic<OKXApiResponse<FundingRate>>(
+                    "/public/funding-rate",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess || response.Data == null || response.Data.Count == 0)
+                {
+                    Log.Error($"OKXRestApiClient.GetFundingRate(): Failed for {instId} - code: {response?.Code}, msg: {response?.Message}");
+                    return null;
+                }
+
+                return response.Data[0];
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetFundingRate(): Exception for {instId}: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets the current interest rates for all borrowed currencies (private endpoint).
+        /// GET /api/v5/account/interest-rate
+        /// Returns daily borrow rates per currency for the unified margin account.
+        /// </summary>
+        /// <returns>List of interest rate entries, or empty list if the request fails.</returns>
+        public List<InterestRate> GetInterestRates()
+        {
+            try
+            {
+                var response = Get<OKXApiResponse<InterestRate>>(
+                    "/account/interest-rate",
+                    queryString: "",
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess)
+                {
+                    Log.Error($"OKXRestApiClient.GetInterestRates(): Failed - code: {response?.Code}, msg: {response?.Message}");
+                    return new List<InterestRate>();
+                }
+
+                return response.Data ?? new List<InterestRate>();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetInterestRates(): Exception: {ex.Message}");
+                return new List<InterestRate>();
+            }
+        }
+
         // ========================================
         // ORDER MANAGEMENT
         // ========================================

@@ -16,6 +16,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Timers;
 using Newtonsoft.Json;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
@@ -33,6 +34,8 @@ namespace QuantConnect.Brokerages.OKX
     /// </summary>
     public class OKXBrokerage : OKXBaseBrokerage
     {
+        /// <summary>Timer that triggers hourly borrow rate refresh.</summary>
+        private Timer _borrowRateTimer;
 
         /// <summary>
         /// Parameterless constructor for DataQueueHandler resolution via Composer.
@@ -76,7 +79,6 @@ namespace QuantConnect.Brokerages.OKX
         {
             Log.Trace($"OKXBrokerage(): Initialized for {OKXEnvironment.GetEnvironmentName()} environment");
         }
-
 
         /// <summary>
         /// Gets all open orders on the account
@@ -192,7 +194,7 @@ namespace QuantConnect.Brokerages.OKX
         /// 1. Validates acctLv matches config (cannot auto-fix, requires manual change)
         /// 2. Auto-sets posMode to net_mode if needed
         /// 3. Auto-sets autoLoan to true if needed (for multi-currency/portfolio margin)
-        /// 4. Auto-sets feeType to "1" (quote currency) if needed
+        /// 4. Auto-sets feeType to "0" (base currency) if needed
         /// 5. Auto-sets settleCcy to "USDT" if needed
         /// </summary>
         protected override void ValidateAccountMode()
@@ -251,11 +253,11 @@ namespace QuantConnect.Brokerages.OKX
                     Log.Trace($"OKXBrokerage.ValidateAccountMode(): Auto loan: {config.AutoLoan} ✓");
                 }
 
-                // 4. Fee type: auto-set to "1" (quote currency)
-                var targetFeeType = "0";
+                // 4. Fee type: auto-set to "0" (fees deducted in base/spot currency)
+                const string targetFeeType = "0";
                 if (config.FeeType != targetFeeType)
                 {
-                    Log.Trace($"OKXBrokerage.ValidateAccountMode(): Setting feeType from '{config.FeeType}' to '1' (quote currency)");
+                    Log.Trace($"OKXBrokerage.ValidateAccountMode(): Setting feeType from '{config.FeeType}' to '0' (base currency)");
                     if (!RestApiClient.SetFeeType(targetFeeType))
                     {
                         Log.Error("OKXBrokerage.ValidateAccountMode(): Failed to set feeType to '1'. Spot fees will be charged in received currency.");
@@ -284,8 +286,15 @@ namespace QuantConnect.Brokerages.OKX
 
                 Log.Trace("OKXBrokerage.ValidateAccountMode(): Account configuration validated successfully");
 
-                // 6. Fetch live fee rates and populate BrokerageFeeCache
+                // 6. Fetch live fee rates and populate BrokerageDataService
                 LoadFeeRates();
+
+                // 7. Fetch initial borrow rates and start hourly refresh timer
+                LoadBorrowRates();
+                _borrowRateTimer?.DisposeSafely();
+                _borrowRateTimer = new Timer(3600 * 1000) { AutoReset = true };
+                _borrowRateTimer.Elapsed += (s, e) => LoadBorrowRates();
+                _borrowRateTimer.Start();
             }
             catch (Exception ex) when (!ex.Message.Contains("mismatch") && !ex.Message.Contains("Failed to retrieve") && !ex.Message.Contains("Invalid okx-unified-account-mode"))
             {
@@ -294,7 +303,7 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Fetches live fee rates from OKX and populates <see cref="BrokerageFeeCache"/>.
+        /// Fetches live fee rates from OKX and populates <see cref="BrokerageDataService"/>.
         /// Uses SPOT rates for spot fee model and SWAP/makerU/takerU for perpetual fee model.
         /// Falls back gracefully — fee models use hard-coded defaults if this call fails.
         /// </summary>
@@ -312,15 +321,23 @@ namespace QuantConnect.Brokerages.OKX
                 }
 
                 static decimal ParseRate(string raw) =>
-                    Math.Abs(decimal.Parse(raw, CultureInfo.InvariantCulture));
+                    decimal.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? Math.Abs(v) : 0m;
 
                 var spotMaker    = ParseRate(spotFee.Maker);
                 var spotTaker    = ParseRate(spotFee.Taker);
                 var perpMaker    = ParseRate(swapFee.MakerU);
                 var perpTaker    = ParseRate(swapFee.TakerU);
-                var deliveryMaker = !string.IsNullOrEmpty(swapFee.Delivery) ? ParseRate(swapFee.Delivery) : 0m;
+                var deliveryMaker = ParseRate(swapFee.Delivery);
 
-                BrokerageFeeCache.Instance.Update(spotMaker, spotTaker, perpMaker, perpTaker, deliveryMaker, deliveryMaker);
+                BrokerageDataService.Instance.UpdateFees(new BrokerageDataService.FeeRates
+                {
+                    SpotMaker = spotMaker,
+                    SpotTaker = spotTaker,
+                    PerpMaker = perpMaker,
+                    PerpTaker = perpTaker,
+                    DeliveryMaker = deliveryMaker,
+                    DeliveryTaker = deliveryMaker
+                });
 
                 Log.Trace($"OKXBrokerage.LoadFeeRates(): Loaded — Spot maker={spotMaker:P4} taker={spotTaker:P4} | Perp maker={perpMaker:P4} taker={perpTaker:P4} (tier: {spotFee.Level})");
             }
@@ -328,6 +345,43 @@ namespace QuantConnect.Brokerages.OKX
             {
                 Log.Error($"OKXBrokerage.LoadFeeRates(): Exception — using default fee constants. {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Fetches current borrow rates from OKX and writes them to <see cref="BrokerageDataService"/>.
+        /// Endpoint: GET /api/v5/account/interest-rate (private, requires auth).
+        /// Falls back gracefully on failure — BrokerageDataService retains prior values.
+        /// </summary>
+        private void LoadBorrowRates()
+        {
+            try
+            {
+                var rates = RestApiClient.GetInterestRates();
+                if (rates == null || rates.Count == 0)
+                {
+                    Log.Error("OKXBrokerage.LoadBorrowRates(): No borrow rate data returned — skipping update");
+                    return;
+                }
+
+                foreach (var rate in rates)
+                {
+                    if (string.IsNullOrEmpty(rate.Ccy)) continue;
+                    BrokerageDataService.Instance.UpdateBorrowRate(rate.Ccy, rate.ToBorrowRate());
+                }
+
+                Log.Trace($"OKXBrokerage.LoadBorrowRates(): Loaded {rates.Count} borrow rate(s)");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXBrokerage.LoadBorrowRates(): Exception — borrow rates not updated. {ex.Message}");
+            }
+        }
+
+        /// <summary>Disposes borrow rate timer in addition to base resources.</summary>
+        public override void Dispose()
+        {
+            _borrowRateTimer?.DisposeSafely();
+            base.Dispose();
         }
     }
 }

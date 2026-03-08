@@ -20,14 +20,14 @@ using QuantConnect.Securities.UnifiedMargin;
 namespace QuantConnect.Brokerages.OKX.Converters
 {
     /// <summary>
-    /// Converter for transforming OKX WebSocket account data to BrokerageMarginCache data
+    /// Converter for transforming OKX WebSocket account data to BrokerageDataService data
     /// </summary>
     public static class AccountConverter
     {
         /// <summary>
         /// Converts an OKX WebSocketAccount to AccountMarginData
         /// </summary>
-        public static BrokerageMarginCache.AccountMarginData ToAccountMarginData(this WebSocketAccount account)
+        public static BrokerageDataService.AccountMarginData ToAccountMarginData(this WebSocketAccount account)
         {
             var lastUpdated = ParseHelper.ParseUnixMilliseconds(account.UpdateTime);
             if (lastUpdated == DateTime.MinValue)
@@ -35,7 +35,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
                 lastUpdated = DateTime.UtcNow;
             }
 
-            return new BrokerageMarginCache.AccountMarginData
+            return new BrokerageDataService.AccountMarginData
             {
                 TotalEquity = ParseHelper.ParseDecimal(account.TotalEquity),
                 MarginBalance = ParseHelper.ParseDecimal(account.AdjustedEquity),
