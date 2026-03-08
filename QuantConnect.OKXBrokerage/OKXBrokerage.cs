@@ -366,9 +366,10 @@ namespace QuantConnect.Brokerages.OKX
                 foreach (var rate in rates)
                 {
                     if (string.IsNullOrEmpty(rate.Ccy)) continue;
-                    // Key by the canonical spot symbol (e.g. "BTC" → BTCUSDT Crypto OKX).
-                    // Convention: borrow rates are stored under the xxxUSDT spot symbol for the asset.
-                    var spotSymbol = Symbol.Create(rate.Ccy + "USDT", SecurityType.Crypto, Market.OKX);
+                    // Convert OKX currency to LEAN spot symbol via the standard mapper (e.g. "BTC" → "BTC-USDT" → BTCUSDT Crypto OKX).
+                    Symbol spotSymbol;
+                    try { spotSymbol = _symbolMapper.GetLeanSymbol(rate.Ccy + "-USDT"); }
+                    catch { continue; }
                     BrokerageDataService.Instance.UpdateBorrowRate(spotSymbol, rate.ToBorrowRate());
                 }
 
