@@ -781,6 +781,74 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             }
         }
 
+        /// <summary>
+        /// Gets all account bills (ledger) within the specified time range.
+        /// GET /api/v5/account/bills
+        /// Rate limit: 10 requests per 2 seconds (account endpoint).
+        /// Handles pagination internally — returns the complete list.
+        /// </summary>
+        /// <param name="type">Bill type filter: "7" = interest deduction, "8" = funding fee. Null for all types.</param>
+        /// <param name="beginMs">Start timestamp in milliseconds (inclusive). Null for no lower bound.</param>
+        /// <returns>All matching bills, newest first. Empty list on failure.</returns>
+        public List<Bill> GetBills(string type = null, long? beginMs = null)
+        {
+            var allBills = new List<Bill>();
+            string afterBillId = null;
+            const int pageSize = 100;
+            const int maxPages = 50;
+
+            try
+            {
+                for (var page = 0; page < maxPages; page++)
+                {
+                    var queryParams = new List<string>();
+
+                    if (!string.IsNullOrEmpty(type))
+                        queryParams.Add($"type={type}");
+
+                    if (beginMs.HasValue)
+                        queryParams.Add($"begin={beginMs.Value}");
+
+                    if (!string.IsNullOrEmpty(afterBillId))
+                        queryParams.Add($"after={afterBillId}");
+
+                    queryParams.Add($"limit={pageSize}");
+
+                    var queryString = string.Join("&", queryParams);
+                    var response = Get<OKXApiResponse<Bill>>(
+                        "/account/bills",
+                        queryString,
+                        defaultValue: null);
+
+                    if (response == null || !response.IsSuccess)
+                    {
+                        Log.Error($"OKXRestApiClient.GetBills(): Failed on page {page} - code: {response?.Code}, msg: {response?.Message}");
+                        break;
+                    }
+
+                    var bills = response.Data;
+                    if (bills == null || bills.Count == 0)
+                        break;
+
+                    allBills.AddRange(bills);
+
+                    if (bills.Count < pageSize)
+                        break;
+
+                    afterBillId = bills[bills.Count - 1].BillId;
+                    if (string.IsNullOrEmpty(afterBillId))
+                        break;
+                }
+
+                return allBills;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetBills(): Exception: {ex.Message}");
+                return allBills;
+            }
+        }
+
         // ========================================
         // ORDER MANAGEMENT
         // ========================================

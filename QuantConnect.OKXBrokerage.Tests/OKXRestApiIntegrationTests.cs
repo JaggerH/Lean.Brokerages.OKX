@@ -414,6 +414,227 @@ namespace QuantConnect.Brokerages.OKX.Tests
 
         #endregion
 
+        #region Bills / Settlement Tests
+
+        /// <summary>
+        /// Tests GetBills returns bills list (all types)
+        /// </summary>
+        [Test]
+        public void GetBills_NoFilter_ReturnsBills()
+        {
+            var bills = _client.GetBills();
+
+            Assert.IsNotNull(bills, "Bills should not be null");
+
+            if (bills.Count > 0)
+            {
+                var first = bills[0];
+
+                Console.WriteLine($"Found {bills.Count} bill(s)");
+                Console.WriteLine($"First bill: BillId={first.BillId}, InstId={first.InstId}, Type={first.Type}");
+                Console.WriteLine($"  BalChg={first.BalanceChange} {first.Ccy}, Ts={first.Ts}");
+
+                Assert.IsNotEmpty(first.BillId, "BillId should not be empty");
+                Assert.IsNotEmpty(first.InstId, "InstId should not be empty");
+                Assert.IsNotEmpty(first.Type, "Type should not be empty");
+                Assert.IsNotEmpty(first.Ts, "Ts should not be empty");
+            }
+            else
+            {
+                Console.WriteLine("Account has no bills in the last 7 days");
+            }
+        }
+
+        /// <summary>
+        /// Tests GetBills with type=8 (funding fee) returns only funding bills
+        /// </summary>
+        [Test]
+        public void GetBills_FundingFee_ReturnsOnlyType8()
+        {
+            var bills = _client.GetBills(type: "8");
+
+            Assert.IsNotNull(bills, "Bills should not be null");
+
+            if (bills.Count > 0)
+            {
+                Assert.That(bills.All(b => b.Type == "8"),
+                    "All bills should be type 8 (funding fee)");
+
+                // All funding bills should be for SWAP instruments
+                Assert.That(bills.All(b => b.InstType == "SWAP"),
+                    "Funding fee bills should be for SWAP instruments");
+
+                Console.WriteLine($"Found {bills.Count} funding fee bill(s)");
+                foreach (var b in bills.Take(5))
+                {
+                    Console.WriteLine($"  {b.InstId}: {b.BalanceChange} {b.Ccy} @ {b.Ts}");
+                }
+            }
+            else
+            {
+                Console.WriteLine("Account has no funding fee bills in the last 7 days");
+            }
+        }
+
+        /// <summary>
+        /// Tests GetBills with type=7 (interest deduction) returns only interest bills
+        /// </summary>
+        [Test]
+        public void GetBills_InterestDeduction_ReturnsOnlyType7()
+        {
+            var bills = _client.GetBills(type: "7");
+
+            Assert.IsNotNull(bills, "Bills should not be null");
+
+            if (bills.Count > 0)
+            {
+                Assert.That(bills.All(b => b.Type == "7"),
+                    "All bills should be type 7 (interest deduction)");
+
+                Console.WriteLine($"Found {bills.Count} interest deduction bill(s)");
+                foreach (var b in bills.Take(5))
+                {
+                    Console.WriteLine($"  {b.InstId}: {b.BalanceChange} {b.Ccy} @ {b.Ts}");
+                }
+            }
+            else
+            {
+                Console.WriteLine("Account has no interest deduction bills in the last 7 days");
+            }
+        }
+
+        /// <summary>
+        /// Tests GetBills with beginMs returns only bills after that timestamp
+        /// </summary>
+        [Test]
+        public void GetBills_WithBeginMs_ReturnsOnlyRecentBills()
+        {
+            // Begin from 1 hour ago
+            var beginMs = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeMilliseconds();
+
+            var bills = _client.GetBills(beginMs: beginMs);
+
+            Assert.IsNotNull(bills, "Bills should not be null");
+
+            if (bills.Count > 0)
+            {
+                // Verify all bills are after the begin timestamp
+                foreach (var bill in bills)
+                {
+                    var billTs = long.Parse(bill.Ts);
+                    Assert.GreaterOrEqual(billTs, beginMs,
+                        $"Bill {bill.BillId} ts={billTs} should be >= begin={beginMs}");
+                }
+
+                Console.WriteLine($"Found {bills.Count} bill(s) in the last hour");
+            }
+            else
+            {
+                Console.WriteLine("Account has no bills in the last hour");
+            }
+        }
+
+        /// <summary>
+        /// Tests GetBills with both type and beginMs filters
+        /// </summary>
+        [Test]
+        public void GetBills_TypeAndBeginMs_ReturnsFilteredBills()
+        {
+            // Funding fees from the last 24 hours
+            var beginMs = DateTimeOffset.UtcNow.AddHours(-24).ToUnixTimeMilliseconds();
+
+            var bills = _client.GetBills(type: "8", beginMs: beginMs);
+
+            Assert.IsNotNull(bills, "Bills should not be null");
+
+            if (bills.Count > 0)
+            {
+                Assert.That(bills.All(b => b.Type == "8"),
+                    "All bills should be type 8");
+
+                foreach (var bill in bills)
+                {
+                    var billTs = long.Parse(bill.Ts);
+                    Assert.GreaterOrEqual(billTs, beginMs,
+                        $"Bill {bill.BillId} ts={billTs} should be >= begin={beginMs}");
+                }
+
+                Console.WriteLine($"Found {bills.Count} funding fee bill(s) in the last 24h");
+            }
+            else
+            {
+                Console.WriteLine("Account has no funding fee bills in the last 24 hours");
+            }
+        }
+
+        /// <summary>
+        /// Tests GetBills numeric fields are parseable
+        /// </summary>
+        [Test]
+        public void GetBills_FieldsAreParseable()
+        {
+            var bills = _client.GetBills(type: "8");
+
+            Assert.IsNotNull(bills, "Bills should not be null");
+
+            if (bills.Count > 0)
+            {
+                var bill = bills[0];
+
+                Assert.DoesNotThrow(() => decimal.Parse(bill.BalanceChange, CultureInfo.InvariantCulture),
+                    "BalanceChange should be parseable as decimal");
+                Assert.DoesNotThrow(() => long.Parse(bill.Ts),
+                    "Ts should be parseable as long");
+
+                if (!string.IsNullOrEmpty(bill.Balance))
+                {
+                    Assert.DoesNotThrow(() => decimal.Parse(bill.Balance, CultureInfo.InvariantCulture),
+                        "Balance should be parseable as decimal");
+                }
+                if (!string.IsNullOrEmpty(bill.Size))
+                {
+                    Assert.DoesNotThrow(() => decimal.Parse(bill.Size, CultureInfo.InvariantCulture),
+                        "Size should be parseable as decimal");
+                }
+
+                Console.WriteLine("All numeric fields are parseable");
+            }
+            else
+            {
+                Console.WriteLine("Account has no bills to verify parsing");
+            }
+        }
+
+        /// <summary>
+        /// Tests GetBills returns bills in descending BillId order (newest first)
+        /// </summary>
+        [Test]
+        public void GetBills_ReturnsDescendingOrder()
+        {
+            var bills = _client.GetBills();
+
+            Assert.IsNotNull(bills, "Bills should not be null");
+
+            if (bills.Count >= 2)
+            {
+                for (int i = 0; i < bills.Count - 1; i++)
+                {
+                    var currentId = long.Parse(bills[i].BillId);
+                    var nextId = long.Parse(bills[i + 1].BillId);
+                    Assert.Greater(currentId, nextId,
+                        $"Bill at index {i} (id={currentId}) should have greater BillId than index {i + 1} (id={nextId})");
+                }
+
+                Console.WriteLine($"Verified descending order for {bills.Count} bills");
+            }
+            else
+            {
+                Console.WriteLine($"Only {bills.Count} bill(s) — cannot verify ordering");
+            }
+        }
+
+        #endregion
+
         #region Execution History Tests
 
         /// <summary>

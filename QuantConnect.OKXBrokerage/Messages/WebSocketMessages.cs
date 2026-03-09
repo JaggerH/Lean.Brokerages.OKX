@@ -613,5 +613,18 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// </summary>
         [JsonProperty("eq")]
         public string Equity { get; set; }
+
+        /// <summary>
+        /// Liability in coin units (negative string = borrowed, e.g. "-0.5").
+        /// Empty or "0" when no liability.
+        /// </summary>
+        [JsonProperty("liab")]
+        public string Liability { get; set; }
+
+        /// <summary>
+        /// Accrued interest in coin units (unpaid interest, e.g. "0.0001").
+        /// </summary>
+        [JsonProperty("interest")]
+        public string Interest { get; set; }
     }
 }

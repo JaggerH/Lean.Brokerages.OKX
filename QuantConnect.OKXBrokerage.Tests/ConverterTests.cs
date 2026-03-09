@@ -523,5 +523,251 @@ namespace QuantConnect.Brokerages.OKX.Tests
         }
 
         #endregion
+
+        #region Bill Deserialization Tests
+
+        /// <summary>
+        /// Tests Bill deserialization with a complete funding fee record (type=8)
+        /// </summary>
+        [Test]
+        public void Bill_FundingFee_DeserializesAllFields()
+        {
+            var json = @"{
+                ""billId"": ""654321"",
+                ""instType"": ""SWAP"",
+                ""instId"": ""BTC-USDT-SWAP"",
+                ""type"": ""8"",
+                ""subType"": ""173"",
+                ""ccy"": ""USDT"",
+                ""balChg"": ""-0.12345678"",
+                ""bal"": ""1000.50"",
+                ""sz"": ""1.5"",
+                ""ts"": ""1709251200000""
+            }";
+
+            var bill = JsonConvert.DeserializeObject<Bill>(json);
+
+            Assert.AreEqual("654321", bill.BillId);
+            Assert.AreEqual("SWAP", bill.InstType);
+            Assert.AreEqual("BTC-USDT-SWAP", bill.InstId);
+            Assert.AreEqual("8", bill.Type);
+            Assert.AreEqual("173", bill.SubType);
+            Assert.AreEqual("USDT", bill.Ccy);
+            Assert.AreEqual("-0.12345678", bill.BalanceChange);
+            Assert.AreEqual("1000.50", bill.Balance);
+            Assert.AreEqual("1.5", bill.Size);
+            Assert.AreEqual("1709251200000", bill.Ts);
+        }
+
+        /// <summary>
+        /// Tests Bill deserialization with an interest deduction record (type=7)
+        /// </summary>
+        [Test]
+        public void Bill_InterestDeduction_DeserializesCorrectly()
+        {
+            var json = @"{
+                ""billId"": ""789012"",
+                ""instType"": ""MARGIN"",
+                ""instId"": ""ETH-USDT"",
+                ""type"": ""7"",
+                ""subType"": ""9"",
+                ""ccy"": ""USDT"",
+                ""balChg"": ""-0.00567"",
+                ""bal"": ""500.25"",
+                ""sz"": ""10"",
+                ""ts"": ""1709337600000""
+            }";
+
+            var bill = JsonConvert.DeserializeObject<Bill>(json);
+
+            Assert.AreEqual("789012", bill.BillId);
+            Assert.AreEqual("MARGIN", bill.InstType);
+            Assert.AreEqual("ETH-USDT", bill.InstId);
+            Assert.AreEqual("7", bill.Type);
+            Assert.AreEqual("-0.00567", bill.BalanceChange);
+        }
+
+        /// <summary>
+        /// Tests Bill deserialization with positive balChg (income, e.g. funding received)
+        /// </summary>
+        [Test]
+        public void Bill_PositiveBalanceChange_DeserializesCorrectly()
+        {
+            var json = @"{
+                ""billId"": ""111111"",
+                ""instType"": ""SWAP"",
+                ""instId"": ""ETH-USDT-SWAP"",
+                ""type"": ""8"",
+                ""subType"": ""173"",
+                ""ccy"": ""USDT"",
+                ""balChg"": ""0.98765432"",
+                ""bal"": ""2000.00"",
+                ""sz"": ""5"",
+                ""ts"": ""1709424000000""
+            }";
+
+            var bill = JsonConvert.DeserializeObject<Bill>(json);
+
+            Assert.AreEqual("0.98765432", bill.BalanceChange);
+            var amount = decimal.Parse(bill.BalanceChange, CultureInfo.InvariantCulture);
+            Assert.Greater(amount, 0m, "Positive balChg indicates income (funding received)");
+        }
+
+        /// <summary>
+        /// Tests Bill deserialization with empty/null optional fields
+        /// </summary>
+        [Test]
+        public void Bill_MissingOptionalFields_DeserializesWithNulls()
+        {
+            var json = @"{
+                ""billId"": ""999999"",
+                ""instType"": ""SWAP"",
+                ""instId"": ""BTC-USDT-SWAP"",
+                ""type"": ""8"",
+                ""ccy"": ""USDT"",
+                ""balChg"": ""-0.01"",
+                ""ts"": ""1709510400000""
+            }";
+
+            var bill = JsonConvert.DeserializeObject<Bill>(json);
+
+            Assert.AreEqual("999999", bill.BillId);
+            Assert.AreEqual("8", bill.Type);
+            Assert.IsNull(bill.SubType, "Missing subType should be null");
+            Assert.IsNull(bill.Balance, "Missing bal should be null");
+            Assert.IsNull(bill.Size, "Missing sz should be null");
+        }
+
+        /// <summary>
+        /// Tests Bill deserialization from OKXApiResponse wrapper (simulating actual API response)
+        /// </summary>
+        [Test]
+        public void Bill_ApiResponseWrapper_DeserializesCorrectly()
+        {
+            var json = @"{
+                ""code"": ""0"",
+                ""msg"": """",
+                ""data"": [
+                    {
+                        ""billId"": ""100001"",
+                        ""instType"": ""SWAP"",
+                        ""instId"": ""BTC-USDT-SWAP"",
+                        ""type"": ""8"",
+                        ""subType"": ""173"",
+                        ""ccy"": ""USDT"",
+                        ""balChg"": ""-0.5"",
+                        ""bal"": ""999.50"",
+                        ""sz"": ""1"",
+                        ""ts"": ""1709596800000""
+                    },
+                    {
+                        ""billId"": ""100002"",
+                        ""instType"": ""SWAP"",
+                        ""instId"": ""ETH-USDT-SWAP"",
+                        ""type"": ""8"",
+                        ""subType"": ""173"",
+                        ""ccy"": ""USDT"",
+                        ""balChg"": ""0.25"",
+                        ""bal"": ""999.75"",
+                        ""sz"": ""2"",
+                        ""ts"": ""1709596800000""
+                    }
+                ]
+            }";
+
+            var response = JsonConvert.DeserializeObject<OKXApiResponse<Bill>>(json);
+
+            Assert.IsTrue(response.IsSuccess, "Response should indicate success");
+            Assert.AreEqual(2, response.Data.Count, "Should contain 2 bills");
+
+            Assert.AreEqual("100001", response.Data[0].BillId);
+            Assert.AreEqual("BTC-USDT-SWAP", response.Data[0].InstId);
+            Assert.AreEqual("-0.5", response.Data[0].BalanceChange);
+
+            Assert.AreEqual("100002", response.Data[1].BillId);
+            Assert.AreEqual("ETH-USDT-SWAP", response.Data[1].InstId);
+            Assert.AreEqual("0.25", response.Data[1].BalanceChange);
+        }
+
+        /// <summary>
+        /// Tests Bill numeric string fields are parseable as decimal
+        /// </summary>
+        [Test]
+        public void Bill_NumericFields_AreParseable()
+        {
+            var json = @"{
+                ""billId"": ""222222"",
+                ""instType"": ""SWAP"",
+                ""instId"": ""BTC-USDT-SWAP"",
+                ""type"": ""8"",
+                ""subType"": ""173"",
+                ""ccy"": ""USDT"",
+                ""balChg"": ""-0.00000001"",
+                ""bal"": ""99999999.99999999"",
+                ""sz"": ""0.001"",
+                ""ts"": ""1709683200000""
+            }";
+
+            var bill = JsonConvert.DeserializeObject<Bill>(json);
+
+            var balChg = decimal.Parse(bill.BalanceChange, CultureInfo.InvariantCulture);
+            var bal = decimal.Parse(bill.Balance, CultureInfo.InvariantCulture);
+            var sz = decimal.Parse(bill.Size, CultureInfo.InvariantCulture);
+            var ts = long.Parse(bill.Ts);
+
+            Assert.AreEqual(-0.00000001m, balChg);
+            Assert.AreEqual(99999999.99999999m, bal);
+            Assert.AreEqual(0.001m, sz);
+            Assert.AreEqual(1709683200000L, ts);
+        }
+
+        /// <summary>
+        /// Tests Bill deserialization with empty data array in API response
+        /// </summary>
+        [Test]
+        public void Bill_EmptyDataArray_DeserializesCorrectly()
+        {
+            var json = @"{
+                ""code"": ""0"",
+                ""msg"": """",
+                ""data"": []
+            }";
+
+            var response = JsonConvert.DeserializeObject<OKXApiResponse<Bill>>(json);
+
+            Assert.IsTrue(response.IsSuccess);
+            Assert.IsNotNull(response.Data);
+            Assert.AreEqual(0, response.Data.Count);
+        }
+
+        /// <summary>
+        /// Tests Bill deserialization preserves descending BillId order (newest first)
+        /// </summary>
+        [Test]
+        public void Bill_DescendingBillIdOrder_IsPreserved()
+        {
+            var json = @"{
+                ""code"": ""0"",
+                ""msg"": """",
+                ""data"": [
+                    { ""billId"": ""300003"", ""instType"": ""SWAP"", ""instId"": ""BTC-USDT-SWAP"", ""type"": ""8"", ""ccy"": ""USDT"", ""balChg"": ""-0.1"", ""ts"": ""1709769600000"" },
+                    { ""billId"": ""300002"", ""instType"": ""SWAP"", ""instId"": ""BTC-USDT-SWAP"", ""type"": ""8"", ""ccy"": ""USDT"", ""balChg"": ""-0.2"", ""ts"": ""1709766000000"" },
+                    { ""billId"": ""300001"", ""instType"": ""SWAP"", ""instId"": ""BTC-USDT-SWAP"", ""type"": ""8"", ""ccy"": ""USDT"", ""balChg"": ""-0.3"", ""ts"": ""1709762400000"" }
+                ]
+            }";
+
+            var response = JsonConvert.DeserializeObject<OKXApiResponse<Bill>>(json);
+
+            Assert.AreEqual(3, response.Data.Count);
+
+            // BillIds should be in descending order (newest first, as returned by OKX API)
+            var id0 = long.Parse(response.Data[0].BillId);
+            var id1 = long.Parse(response.Data[1].BillId);
+            var id2 = long.Parse(response.Data[2].BillId);
+            Assert.Greater(id0, id1);
+            Assert.Greater(id1, id2);
+        }
+
+        #endregion
     }
 }

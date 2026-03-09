@@ -557,6 +557,14 @@ namespace QuantConnect.Brokerages.OKX
                 var marginData = account.ToAccountMarginData();
                 // Update BrokerageDataService for MultiCurrencyBuyingPowerModel
                 BrokerageDataService.Instance.UpdateMargin(marginData);
+
+                // Extract and update per-currency balances
+                var balances = account.ExtractCurrencyBalances();
+                foreach (var balance in balances)
+                {
+                    BrokerageDataService.Instance.UpdateCurrencyBalance(
+                        balance.Currency, balance);
+                }
             }
             catch (Exception ex)
             {

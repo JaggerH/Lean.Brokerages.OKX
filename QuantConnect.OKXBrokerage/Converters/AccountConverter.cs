@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Collections.Generic;
 using QuantConnect.Brokerages.OKX.Messages;
 using QuantConnect.Securities.UnifiedMargin;
 
@@ -35,6 +36,21 @@ namespace QuantConnect.Brokerages.OKX.Converters
                 lastUpdated = DateTime.UtcNow;
             }
 
+            // Sum per-currency liabilities for TotalLiability
+            // Individual per-currency entries are written separately via ExtractCurrencyLiabilities()
+            decimal totalLiability = 0m;
+            if (account.Details != null)
+            {
+                foreach (var detail in account.Details)
+                {
+                    var liab = ParseHelper.ParseDecimal(detail.Liability);
+                    if (liab != 0)
+                    {
+                        totalLiability += Math.Abs(liab);
+                    }
+                }
+            }
+
             return new BrokerageDataService.AccountMarginData
             {
                 TotalEquity = ParseHelper.ParseDecimal(account.TotalEquity),
@@ -44,9 +60,41 @@ namespace QuantConnect.Brokerages.OKX.Converters
                 MaintenanceMarginUsed = ParseHelper.ParseDecimal(account.MaintenanceMarginRequirement),
                 MaintenanceMarginRate = ParseHelper.ParseDecimal(account.MarginRatio),
                 InitialMarginRate = 0m,
-                TotalLiability = 0m,
+                TotalLiability = totalLiability,
                 LastUpdated = lastUpdated
             };
+        }
+
+        /// <summary>
+        /// Extracts per-currency balance snapshots from OKX account details.
+        /// Returns an entry for every currency in the details array.
+        /// </summary>
+        public static List<BrokerageDataService.CurrencyBalance> ExtractCurrencyBalances(
+            this WebSocketAccount account)
+        {
+            var result = new List<BrokerageDataService.CurrencyBalance>();
+            if (account.Details == null) return result;
+
+            var now = DateTime.UtcNow;
+            foreach (var detail in account.Details)
+            {
+                if (string.IsNullOrEmpty(detail.Currency)) continue;
+
+                var liab = ParseHelper.ParseDecimal(detail.Liability);
+
+                result.Add(new BrokerageDataService.CurrencyBalance
+                {
+                    Currency = detail.Currency,
+                    AvailableBalance = ParseHelper.ParseDecimal(detail.AvailableBalance),
+                    FrozenBalance = ParseHelper.ParseDecimal(detail.FrozenBalance),
+                    Equity = ParseHelper.ParseDecimal(detail.Equity),
+                    Borrowed = Math.Abs(liab),
+                    AccruedInterest = ParseHelper.ParseDecimal(detail.Interest),
+                    UpdatedAt = now
+                });
+            }
+
+            return result;
         }
     }
 }
