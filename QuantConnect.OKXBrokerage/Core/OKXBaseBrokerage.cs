@@ -40,7 +40,7 @@ namespace QuantConnect.Brokerages.OKX
     /// Provides common WebSocket management, order state tracking, and data handling
     /// Eliminates IsFuturesModel checks in favor of proper OOP via virtual methods
     /// </summary>
-    public abstract partial class OKXBaseBrokerage : BaseWebsocketsBrokerage, IDataQueueHandler, IDataQueueUniverseProvider, IExecutionHistoryProvider
+    public abstract partial class OKXBaseBrokerage : BaseWebsocketsBrokerage, IDataQueueHandler, IDataQueueUniverseProvider, IExecutionHistoryProvider, IInterestSettlementProvider
     {
         // ========================================
         // CONSTANTS
@@ -508,6 +508,37 @@ namespace QuantConnect.Brokerages.OKX
             }
         }
 
+
+        /// <summary>
+        /// Gets interest and funding fee settlements since the specified time.
+        /// Pulls both type=7 (interest deduction) and type=8 (funding fee) from OKX bills API.
+        /// </summary>
+        /// <param name="sinceUtc">Start time (exclusive). Only settlements after this time are returned.</param>
+        /// <returns>List of settlement records, newest first. Empty list on failure.</returns>
+        public List<InterestSettlement> GetInterestSettlements(DateTime sinceUtc)
+        {
+            try
+            {
+                var beginMs = new DateTimeOffset(sinceUtc).ToUnixTimeMilliseconds() + 1;
+
+                // Pull both funding fees (type=8) and interest deductions (type=7)
+                var fundingBills = RestApiClient.GetBills(type: "8", beginMs: beginMs);
+                var interestBills = RestApiClient.GetBills(type: "7", beginMs: beginMs);
+
+                var allBills = new List<Messages.Bill>();
+                allBills.AddRange(fundingBills);
+                allBills.AddRange(interestBills);
+
+                return allBills
+                    .Select(bill => bill.ToInterestSettlement(_symbolMapper))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXBaseBrokerage.GetInterestSettlements(): Error: {ex.Message}");
+                return new List<InterestSettlement>();
+            }
+        }
 
         // ========================================
         // SUBSCRIPTIONMANAGER CALLBACKS
