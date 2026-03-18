@@ -782,6 +782,36 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         }
 
         /// <summary>
+        /// Gets per-currency borrow quotas (loanQuota) from the interest-limits endpoint (private).
+        /// GET /api/v5/account/interest-limits
+        /// Rate limit: 5 requests per 2 seconds.
+        /// </summary>
+        /// <returns>List of per-currency borrow limit records, or empty list on failure.</returns>
+        public List<InterestLimitRecord> GetInterestLimits()
+        {
+            try
+            {
+                var response = Get<OKXApiResponse<InterestLimitResponse>>(
+                    "/account/interest-limits",
+                    queryString: "",
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess)
+                {
+                    Log.Error($"OKXRestApiClient.GetInterestLimits(): Failed - code: {response?.Code}, msg: {response?.Message}");
+                    return new List<InterestLimitRecord>();
+                }
+
+                return response.Data?.FirstOrDefault()?.Records ?? new List<InterestLimitRecord>();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetInterestLimits(): Exception: {ex.Message}");
+                return new List<InterestLimitRecord>();
+            }
+        }
+
+        /// <summary>
         /// Gets all account bills (ledger) within the specified time range.
         /// GET /api/v5/account/bills
         /// Rate limit: 10 requests per 2 seconds (account endpoint).

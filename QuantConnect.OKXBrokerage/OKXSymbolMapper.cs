@@ -70,6 +70,12 @@ namespace QuantConnect.Brokerages.OKX
             => GetLeanSymbol(brokerageSymbol, InferSecurityType(brokerageSymbol), _market);
 
         /// <summary>
+        /// Converts a bare currency code (e.g. "XRP") to the default USDT-quoted spot Symbol.
+        /// </summary>
+        public Symbol GetCurrencySymbol(string currency)
+            => GetLeanSymbol(currency + "-USDT", SecurityType.Crypto, _market);
+
+        /// <summary>
         /// Converts a Lean symbol instance to an OKX brokerage symbol
         /// </summary>
         /// <param name="symbol">A Lean symbol instance</param>

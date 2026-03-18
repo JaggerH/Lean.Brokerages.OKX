@@ -15,18 +15,22 @@
 
 using System;
 using System.Collections.Concurrent;
+using QuantConnect.Algorithm;
 using QuantConnect.Algorithm.Framework.Execution;
 using QuantConnect.Brokerages.OKX.RestApi;
 using QuantConnect.Configuration;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
+using QuantConnect.Securities;
+using QuantConnect.Securities.UnifiedMargin;
 
 namespace QuantConnect.Brokerages.OKX
 {
     /// <summary>
-    /// OKX-specific execution constraint that enforces per-instrument order size limits
-    /// fetched from the OKX /api/v5/public/instruments endpoint (no auth required).
-    /// Caches instrument data in a ConcurrentDictionary with 24h TTL.
+    /// OKX-specific execution constraint that enforces:
+    /// 1. Per-instrument order size limits (maxMktSz/maxLmtSz from /api/v5/public/instruments)
+    /// 2. Per-currency borrow quota limits (loanQuota from /api/v5/account/interest-limits via BrokerageDataService)
+    /// The minimum of all limiters is returned (min-limit model).
     /// </summary>
     public class OKXConstraint : ExecutionConstraint
     {
@@ -68,10 +72,23 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
-        /// Returns the maximum allowed order quantity based on OKX per-instrument limits.
-        /// Two independent limiters (Size + Amount), take min.
+        /// Returns the maximum allowed order quantity based on OKX per-instrument limits
+        /// and per-currency borrow quota. Takes the minimum across all limiters.
         /// </summary>
         public override decimal GetValue(ConstraintContext ctx)
+        {
+            var qtyFromInstrument = GetInstrumentLimit(ctx);
+            var qtyFromBorrow = GetBorrowQuotaLimit(ctx);
+
+            return ctx.FloorToStep(Math.Min(qtyFromInstrument, qtyFromBorrow));
+        }
+
+        // ─── Instrument Limits (maxMktSz / maxLmtSz / maxLmtAmt / maxMktAmt) ───
+
+        /// <summary>
+        /// Returns the maximum allowed quantity based on per-instrument size/amount limits.
+        /// </summary>
+        private decimal GetInstrumentLimit(ConstraintContext ctx)
         {
             if (!TryGetLimit(ctx.Symbol, out var limit))
                 return NoLimit;
@@ -88,7 +105,7 @@ namespace QuantConnect.Brokerages.OKX
             var qtyFromSize = GetSizeLimit(ctx, limit, effectiveOrderType);
             var qtyFromAmount = GetAmountLimit(ctx, limit, effectiveOrderType);
 
-            return ctx.FloorToStep(Math.Min(qtyFromSize, qtyFromAmount));
+            return Math.Min(qtyFromSize, qtyFromAmount);
         }
 
         /// <summary>
@@ -125,6 +142,58 @@ namespace QuantConnect.Brokerages.OKX
 
             return NoLimit;
         }
+
+        // ─── Borrow Quota Limit (loanQuota from interest-limits API) ───
+
+        /// <summary>
+        /// Returns the maximum sellable quantity for crypto spot, considering borrow quota.
+        /// Formula: maxSellable = CashBook[ccy] + loanQuota - pendingSells
+        /// Only constrains crypto spot sell orders (where selling beyond holdings triggers borrowing).
+        /// </summary>
+        private decimal GetBorrowQuotaLimit(ConstraintContext ctx)
+        {
+            // Only constrain crypto spot sell orders
+            if (ctx.Security.Type != SecurityType.Crypto || ctx.UnorderedQuantity >= 0)
+                return NoLimit;
+
+            if (!(ctx.Security is IBaseCurrencySymbol baseCurrency))
+                return NoLimit;
+
+            if (!BrokerageDataService.Instance.TryGetBorrowQuota(ctx.Symbol, out var loanQuota))
+                return NoLimit;
+
+            var ccy = baseCurrency.BaseCurrency.Symbol;
+
+            // CashBook encodes borrow state: positive = holdings, negative = borrowed
+            decimal cashAmount = 0m;
+            if (ctx.Algorithm.Portfolio.CashBook.TryGetValue(ccy, out var cash))
+                cashAmount = cash.Amount;
+
+            decimal pendingSells = GetPendingSpotSells(ctx.Algorithm, ccy);
+
+            // cash + loanQuota = total sellable (holdings + max borrowable)
+            return Math.Max(0m, cashAmount + loanQuota - pendingSells);
+        }
+
+        /// <summary>
+        /// Sums the absolute remaining quantity of all open spot sell orders for the given base currency.
+        /// This accounts for in-flight orders not yet reflected in CashBook.
+        /// </summary>
+        private static decimal GetPendingSpotSells(AQCAlgorithm algorithm, string baseCcy)
+        {
+            decimal total = 0m;
+            foreach (var ticket in algorithm.Transactions.GetOpenOrderTickets(
+                t => t.Quantity < 0 && algorithm.Securities[t.Symbol].Type == SecurityType.Crypto))
+            {
+                if (!(algorithm.Securities[ticket.Symbol] is IBaseCurrencySymbol bc)
+                    || bc.BaseCurrency.Symbol != baseCcy) continue;
+
+                total += Math.Abs(ticket.QuantityRemaining);
+            }
+            return total;
+        }
+
+        // ─── Instrument Cache ───
 
         private readonly object _refreshLock = new();
 

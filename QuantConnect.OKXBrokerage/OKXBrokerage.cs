@@ -289,11 +289,12 @@ namespace QuantConnect.Brokerages.OKX
                 // 6. Fetch live fee rates and populate BrokerageDataService
                 LoadFeeRates();
 
-                // 7. Fetch initial borrow rates and start hourly refresh timer
+                // 7. Fetch initial borrow rates + borrow quotas and start hourly refresh timer
                 LoadBorrowRates();
+                LoadBorrowQuotas();
                 _borrowRateTimer?.DisposeSafely();
                 _borrowRateTimer = new Timer(3600 * 1000) { AutoReset = true };
-                _borrowRateTimer.Elapsed += (s, e) => LoadBorrowRates();
+                _borrowRateTimer.Elapsed += (s, e) => { LoadBorrowRates(); LoadBorrowQuotas(); };
                 _borrowRateTimer.Start();
             }
             catch (Exception ex) when (!ex.Message.Contains("mismatch") && !ex.Message.Contains("Failed to retrieve") && !ex.Message.Contains("Invalid okx-unified-account-mode"))
@@ -366,9 +367,8 @@ namespace QuantConnect.Brokerages.OKX
                 foreach (var rate in rates)
                 {
                     if (string.IsNullOrEmpty(rate.Ccy)) continue;
-                    // Convert OKX currency to LEAN spot symbol via the standard mapper (e.g. "BTC" → "BTC-USDT" → BTCUSDT Crypto OKX).
                     Symbol spotSymbol;
-                    try { spotSymbol = _symbolMapper.GetLeanSymbol(rate.Ccy + "-USDT"); }
+                    try { spotSymbol = _symbolMapper.GetCurrencySymbol(rate.Ccy); }
                     catch { continue; }
                     BrokerageDataService.Instance.UpdateBorrowRate(spotSymbol, rate.ToBorrowRate());
                 }
@@ -378,6 +378,39 @@ namespace QuantConnect.Brokerages.OKX
             catch (Exception ex)
             {
                 Log.Error($"OKXBrokerage.LoadBorrowRates(): Exception — borrow rates not updated. {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Fetches per-currency borrow quotas (loanQuota) from OKX and writes them to <see cref="BrokerageDataService"/>.
+        /// Endpoint: GET /api/v5/account/interest-limits (private, requires auth).
+        /// Falls back gracefully on failure — BrokerageDataService retains prior values.
+        /// </summary>
+        private void LoadBorrowQuotas()
+        {
+            try
+            {
+                var records = RestApiClient.GetInterestLimits();
+                if (records == null || records.Count == 0)
+                {
+                    Log.Error("OKXBrokerage.LoadBorrowQuotas(): No borrow quota data returned — skipping update");
+                    return;
+                }
+
+                foreach (var record in records)
+                {
+                    if (string.IsNullOrEmpty(record.Ccy)) continue;
+                    Symbol spotSymbol;
+                    try { spotSymbol = _symbolMapper.GetCurrencySymbol(record.Ccy); }
+                    catch { continue; }
+                    BrokerageDataService.Instance.UpdateBorrowQuota(spotSymbol, record.GetLoanQuota());
+                }
+
+                Log.Trace($"OKXBrokerage.LoadBorrowQuotas(): Loaded {records.Count} borrow quota(s)");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXBrokerage.LoadBorrowQuotas(): Exception — borrow quotas not updated. {ex.Message}");
             }
         }
 
