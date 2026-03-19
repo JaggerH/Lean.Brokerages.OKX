@@ -626,5 +626,13 @@ namespace QuantConnect.Brokerages.OKX.Messages
         /// </summary>
         [JsonProperty("interest")]
         public string Interest { get; set; }
+
+        /// <summary>
+        /// Maximum borrowable amount for this currency at current leverage tier (sell-side only).
+        /// Represents remaining borrowable base currency, already accounting for existing borrows
+        /// and pending orders. Pushed by WS account channel. Empty string when not applicable.
+        /// </summary>
+        [JsonProperty("maxLoan")]
+        public string MaxLoan { get; set; }
     }
 }

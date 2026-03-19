@@ -812,6 +812,39 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         }
 
         /// <summary>
+        /// Gets the maximum borrowable amounts for an instrument at the current leverage tier.
+        /// GET /api/v5/account/max-loan
+        /// Rate limit: 20 requests per 2 seconds.
+        /// Returns records for both sides (buy and sell) when available.
+        /// </summary>
+        /// <param name="instId">Instrument ID (e.g. "LINK-USDT").</param>
+        /// <param name="mgnMode">Margin mode: "cross" or "isolated". Default "cross".</param>
+        /// <returns>List of MaxLoanRecord (typically 2: one per side), or empty list on failure.</returns>
+        public List<MaxLoanRecord> GetMaxLoan(string instId, string mgnMode = "cross")
+        {
+            try
+            {
+                var response = Get<OKXApiResponse<MaxLoanRecord>>(
+                    "/account/max-loan",
+                    queryString: $"instId={instId}&mgnMode={mgnMode}",
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess)
+                {
+                    Log.Error($"OKXRestApiClient.GetMaxLoan({instId}): Failed - code: {response?.Code}, msg: {response?.Message}");
+                    return new List<MaxLoanRecord>();
+                }
+
+                return response.Data ?? new List<MaxLoanRecord>();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetMaxLoan({instId}): Exception: {ex.Message}");
+                return new List<MaxLoanRecord>();
+            }
+        }
+
+        /// <summary>
         /// Gets all account bills (ledger) within the specified time range.
         /// GET /api/v5/account/bills
         /// Rate limit: 10 requests per 2 seconds (account endpoint).

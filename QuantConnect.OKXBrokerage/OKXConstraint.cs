@@ -15,6 +15,7 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using QuantConnect.Algorithm;
 using QuantConnect.Algorithm.Framework.Execution;
 using QuantConnect.Brokerages.OKX.RestApi;
@@ -26,17 +27,24 @@ using QuantConnect.Securities.UnifiedMargin;
 
 namespace QuantConnect.Brokerages.OKX
 {
+    // Future optimization: if _maxLoanCache needs to be updated from outside this instance
+    // (e.g., leverage change callbacks), consider creating a global OKX-specific data manager
+    // class within the OKX project (similar to BDS but for exchange-specific variables).
+
     /// <summary>
     /// OKX-specific execution constraint that enforces:
-    /// 1. Per-instrument order size limits (maxMktSz/maxLmtSz from /api/v5/public/instruments)
-    /// 2. Per-currency borrow quota limits (loanQuota from /api/v5/account/interest-limits via BrokerageDataService)
+    /// 1. Per-instrument order size limits (from /api/v5/public/instruments)
+    /// 2. Per-currency borrow limits: min(loanQuota, maxLoan)
+    ///    - loanQuota: platform-wide limit (BDS, hourly refresh)
+    ///    - maxLoan: leverage-tier limit (WS CurrencyBalance → REST fallback)
     /// The minimum of all limiters is returned (min-limit model).
     /// </summary>
     public class OKXConstraint : ExecutionConstraint
     {
         private readonly Lazy<OKXRestApiClient> _client;
         private readonly OKXSymbolMapper _symbolMapper = new(Market.OKX);
-        private readonly ConcurrentDictionary<Symbol, InstrumentLimit> _cache = new();
+        private readonly ConcurrentDictionary<Symbol, InstrumentLimit> _instrumentLimits = new();
+        private readonly ConcurrentDictionary<Symbol, decimal> _maxLoanCache = new();
         private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
 
         private readonly struct InstrumentLimit
@@ -143,54 +151,57 @@ namespace QuantConnect.Brokerages.OKX
             return NoLimit;
         }
 
-        // ─── Borrow Quota Limit (loanQuota from interest-limits API) ───
+        // ─── Borrow Limit (maxLoan, sell-side only) ───
 
         /// <summary>
-        /// Returns the maximum sellable quantity for crypto spot, considering borrow quota.
-        /// Formula: maxSellable = CashBook[ccy] + loanQuota - pendingSells
-        /// Only constrains crypto spot sell orders (where selling beyond holdings triggers borrowing).
+        /// Returns the maximum sellable quantity for crypto spot, based on maxLoan.
+        /// maxLoan is the remaining borrowable amount at current leverage tier,
+        /// already accounting for existing borrows and pending orders.
+        /// Two-layer hit:
+        ///   Hit 1 — WS: BDS CurrencyBalance.MaxLoan (sell-side only, auto-updated on leverage change)
+        ///   Hit 2 — REST: _maxLoanCache[Symbol], fetched on-demand via GetMaxLoan(side=sell)
+        /// Only constrains crypto spot sell orders (selling beyond holdings triggers base ccy borrowing).
+        /// Buy-side borrowing (quote ccy) is already constrained by Margin + SpotExposure.
         /// </summary>
         private decimal GetBorrowQuotaLimit(ConstraintContext ctx)
         {
-            // Only constrain crypto spot sell orders
             if (ctx.Security.Type != SecurityType.Crypto || ctx.UnorderedQuantity >= 0)
                 return NoLimit;
 
             if (!(ctx.Security is IBaseCurrencySymbol baseCurrency))
                 return NoLimit;
 
-            if (!BrokerageDataService.Instance.TryGetBorrowQuota(ctx.Symbol, out var loanQuota))
-                return NoLimit;
-
             var ccy = baseCurrency.BaseCurrency.Symbol;
 
-            // CashBook encodes borrow state: positive = holdings, negative = borrowed
-            decimal cashAmount = 0m;
-            if (ctx.Algorithm.Portfolio.CashBook.TryGetValue(ccy, out var cash))
-                cashAmount = cash.Amount;
+            // Hit 1: WS via BDS CurrencyBalance.MaxLoan
+            // WS account channel only pushes maxLoan for the sell-side (base ccy borrowing)
+            if (BrokerageDataService.Instance.TryGetCurrencyBalance(ccy, out var balance)
+                && balance.MaxLoan > 0)
+                return balance.MaxLoan;
 
-            decimal pendingSells = GetPendingSpotSells(ctx.Algorithm, ccy);
+            // Hit 2: REST cache (new currencies, not yet in WS)
+            if (_maxLoanCache.TryGetValue(ctx.Symbol, out var cached))
+                return cached;
 
-            // cash + loanQuota = total sellable (holdings + max borrowable)
-            return Math.Max(0m, cashAmount + loanQuota - pendingSells);
-        }
-
-        /// <summary>
-        /// Sums the absolute remaining quantity of all open spot sell orders for the given base currency.
-        /// This accounts for in-flight orders not yet reflected in CashBook.
-        /// </summary>
-        private static decimal GetPendingSpotSells(AQCAlgorithm algorithm, string baseCcy)
-        {
-            decimal total = 0m;
-            foreach (var ticket in algorithm.Transactions.GetOpenOrderTickets(
-                t => t.Quantity < 0 && algorithm.Securities[t.Symbol].Type == SecurityType.Crypto))
+            // Miss: REST fetch (side=sell) → cache
+            try
             {
-                if (!(algorithm.Securities[ticket.Symbol] is IBaseCurrencySymbol bc)
-                    || bc.BaseCurrency.Symbol != baseCcy) continue;
-
-                total += Math.Abs(ticket.QuantityRemaining);
+                var instId = _symbolMapper.GetBrokerageSymbol(ctx.Symbol);
+                var records = _client.Value.GetMaxLoan(instId);
+                var sellRecord = records.FirstOrDefault(r => r.Side == "sell");
+                if (sellRecord != null)
+                {
+                    var maxLoan = sellRecord.GetMaxLoan();
+                    if (maxLoan > 0)
+                    {
+                        _maxLoanCache[ctx.Symbol] = maxLoan;
+                        return maxLoan;
+                    }
+                }
             }
-            return total;
+            catch { /* best-effort */ }
+
+            return NoLimit;
         }
 
         // ─── Instrument Cache ───
@@ -199,13 +210,13 @@ namespace QuantConnect.Brokerages.OKX
 
         private bool TryGetLimit(Symbol symbol, out InstrumentLimit limit)
         {
-            if (_cache.TryGetValue(symbol, out limit) && !limit.IsExpired)
+            if (_instrumentLimits.TryGetValue(symbol, out limit) && !limit.IsExpired)
                 return true;
 
             lock (_refreshLock)
             {
                 // Double-check after acquiring lock
-                if (_cache.TryGetValue(symbol, out limit) && !limit.IsExpired)
+                if (_instrumentLimits.TryGetValue(symbol, out limit) && !limit.IsExpired)
                     return true;
 
                 return RefreshCache(symbol, out limit);
@@ -236,7 +247,7 @@ namespace QuantConnect.Brokerages.OKX
                     try { leanSymbol = _symbolMapper.GetLeanSymbol(inst.InstrumentId); }
                     catch { continue; }
 
-                    _cache[leanSymbol] = new InstrumentLimit(
+                    _instrumentLimits[leanSymbol] = new InstrumentLimit(
                         ParseHelper.ParseDecimal(inst.MaxMarketSize),
                         ParseHelper.ParseDecimal(inst.MaxLimitSize),
                         ParseHelper.ParseDecimal(inst.MaxMarketAmount),
@@ -245,7 +256,7 @@ namespace QuantConnect.Brokerages.OKX
                 }
 
                 Log.Trace($"OKXConstraint: Refreshed {instruments.Count} {instType} instruments");
-                return _cache.TryGetValue(symbol, out limit);
+                return _instrumentLimits.TryGetValue(symbol, out limit);
             }
             catch (Exception ex)
             {

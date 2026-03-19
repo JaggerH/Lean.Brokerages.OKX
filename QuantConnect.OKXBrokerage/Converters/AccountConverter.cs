@@ -90,6 +90,7 @@ namespace QuantConnect.Brokerages.OKX.Converters
                     Equity = ParseHelper.ParseDecimal(detail.Equity),
                     Borrowed = Math.Abs(liab),
                     AccruedInterest = ParseHelper.ParseDecimal(detail.Interest),
+                    MaxLoan = ParseHelper.ParseDecimal(detail.MaxLoan),
                     UpdatedAt = now
                 });
             }
