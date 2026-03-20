@@ -155,13 +155,16 @@ namespace QuantConnect.Brokerages.OKX
 
         /// <summary>
         /// Returns the maximum sellable quantity for crypto spot, based on maxLoan.
-        /// maxLoan is the remaining borrowable amount at current leverage tier,
-        /// already accounting for existing borrows and pending orders.
         /// Two-layer hit:
-        ///   Hit 1 — WS: BDS CurrencyBalance.MaxLoan (sell-side only, auto-updated on leverage change)
+        ///   Hit 1 — WS: BDS CurrencyBalance (Borrowed + MaxLoan = total tier capacity)
         ///   Hit 2 — REST: _maxLoanCache[Symbol], fetched on-demand via GetMaxLoan(side=sell)
         /// Only constrains crypto spot sell orders (selling beyond holdings triggers base ccy borrowing).
         /// Buy-side borrowing (quote ccy) is already constrained by Margin + SpotExposure.
+        ///
+        /// Race condition fix: WS MaxLoan may lag behind fills. Instead of using MaxLoan directly
+        /// (which is "remaining borrowable" and stale until next WS push), we compute:
+        ///   totalCapacity = Borrowed + MaxLoan   (stable tier limit, changes only on leverage/tier change)
+        ///   remaining = totalCapacity - currentBorrowed   (CashBook is real-time, updated on fill)
         /// </summary>
         private decimal GetBorrowQuotaLimit(ConstraintContext ctx)
         {
@@ -173,13 +176,22 @@ namespace QuantConnect.Brokerages.OKX
 
             var ccy = baseCurrency.BaseCurrency.Symbol;
 
-            // Hit 1: WS via BDS CurrencyBalance.MaxLoan
-            // WS account channel only pushes maxLoan for the sell-side (base ccy borrowing)
-            if (BrokerageDataService.Instance.TryGetCurrencyBalance(ccy, out var balance)
-                && balance.MaxLoan > 0)
-                return balance.MaxLoan;
+            // Current borrowed amount from CashBook (real-time, no WS delay)
+            decimal currentBorrowed = 0;
+            if (ctx.Algorithm.Portfolio.CashBook.TryGetValue(ccy, out var cash) && cash.Amount < 0)
+                currentBorrowed = Math.Abs(cash.Amount);
 
-            // Hit 2: REST cache (new currencies, not yet in WS)
+            // Hit 1: WS via BDS CurrencyBalance
+            // Borrowed + MaxLoan = total tier capacity (stable across WS update delays)
+            // Guard: either MaxLoan > 0 (can still borrow) or Borrowed > 0 (already borrowing, MaxLoan may be 0 = limit reached)
+            if (BrokerageDataService.Instance.TryGetCurrencyBalance(ccy, out var balance)
+                && (balance.MaxLoan > 0 || balance.Borrowed > 0))
+            {
+                var totalCapacity = balance.Borrowed + balance.MaxLoan;
+                return Math.Max(0, totalCapacity - currentBorrowed);
+            }
+
+            // Hit 2: REST cache (new currencies, not yet in WS — no existing borrows)
             if (_maxLoanCache.TryGetValue(ctx.Symbol, out var cached))
                 return cached;
 
