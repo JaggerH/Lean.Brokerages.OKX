@@ -164,7 +164,8 @@ namespace QuantConnect.Brokerages.OKX
         /// Race condition fix: WS MaxLoan may lag behind fills. Instead of using MaxLoan directly
         /// (which is "remaining borrowable" and stale until next WS push), we compute:
         ///   totalCapacity = Borrowed + MaxLoan   (stable tier limit, changes only on leverage/tier change)
-        ///   remaining = totalCapacity - currentBorrowed   (CashBook is real-time, updated on fill)
+        ///   remaining = positiveHoldings + max(0, totalCapacity - currentBorrowed)
+        /// where positiveHoldings = sellable without borrowing, currentBorrowed from CashBook (real-time).
         /// </summary>
         private decimal GetBorrowQuotaLimit(ConstraintContext ctx)
         {
@@ -176,24 +177,28 @@ namespace QuantConnect.Brokerages.OKX
 
             var ccy = baseCurrency.BaseCurrency.Symbol;
 
-            // Current borrowed amount from CashBook (real-time, no WS delay)
+            // Current position from CashBook (real-time, updated on fill without WS delay)
+            decimal positiveHoldings = 0;
             decimal currentBorrowed = 0;
-            if (ctx.Algorithm.Portfolio.CashBook.TryGetValue(ccy, out var cash) && cash.Amount < 0)
-                currentBorrowed = Math.Abs(cash.Amount);
+            if (ctx.Algorithm.Portfolio.CashBook.TryGetValue(ccy, out var cash))
+            {
+                if (cash.Amount > 0)
+                    positiveHoldings = cash.Amount;
+                else if (cash.Amount < 0)
+                    currentBorrowed = Math.Abs(cash.Amount);
+            }
 
             // Hit 1: WS via BDS CurrencyBalance
             // Borrowed + MaxLoan = total tier capacity (stable across WS update delays)
-            // Guard: either MaxLoan > 0 (can still borrow) or Borrowed > 0 (already borrowing, MaxLoan may be 0 = limit reached)
-            if (BrokerageDataService.Instance.TryGetCurrencyBalance(ccy, out var balance)
-                && (balance.MaxLoan > 0 || balance.Borrowed > 0))
+            if (BrokerageDataService.Instance.TryGetCurrencyBalance(ccy, out var balance))
             {
                 var totalCapacity = balance.Borrowed + balance.MaxLoan;
-                return Math.Max(0, totalCapacity - currentBorrowed);
+                return positiveHoldings + Math.Max(0, totalCapacity - currentBorrowed);
             }
 
-            // Hit 2: REST cache (new currencies, not yet in WS — no existing borrows)
+            // Hit 2: REST cache (new currencies, not yet in WS)
             if (_maxLoanCache.TryGetValue(ctx.Symbol, out var cached))
-                return cached;
+                return positiveHoldings + cached;
 
             // Miss: REST fetch (side=sell) → cache
             try
@@ -204,10 +209,10 @@ namespace QuantConnect.Brokerages.OKX
                 if (sellRecord != null)
                 {
                     var maxLoan = sellRecord.GetMaxLoan();
-                    if (maxLoan > 0)
+                    if (maxLoan >= 0)
                     {
                         _maxLoanCache[ctx.Symbol] = maxLoan;
-                        return maxLoan;
+                        return positiveHoldings + maxLoan;
                     }
                 }
             }
