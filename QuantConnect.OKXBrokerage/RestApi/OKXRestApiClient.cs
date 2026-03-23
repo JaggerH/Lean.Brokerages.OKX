@@ -752,6 +752,39 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         }
 
         /// <summary>
+        /// Gets historical funding rate records for a SWAP instrument (public endpoint, no auth).
+        /// GET /api/v5/public/funding-rate-history?instId={instId}&amp;limit={limit}
+        /// Returns records in reverse chronological order (newest first).
+        /// </summary>
+        /// <param name="instId">OKX instrument ID, e.g. "BTC-USDT-SWAP".</param>
+        /// <param name="limit">Maximum number of records to return (max 100).</param>
+        /// <returns>List of historical funding rate entries, or null if the request fails.</returns>
+        public List<FundingRateHistory> GetFundingRateHistory(string instId, int limit = 100)
+        {
+            try
+            {
+                var queryString = $"instId={instId}&limit={limit}";
+                var response = GetPublic<OKXApiResponse<FundingRateHistory>>(
+                    "/public/funding-rate-history",
+                    queryString,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess || response.Data == null)
+                {
+                    Log.Error($"OKXRestApiClient.GetFundingRateHistory(): Failed for {instId} - code: {response?.Code}, msg: {response?.Message}");
+                    return null;
+                }
+
+                return response.Data;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetFundingRateHistory(): Exception for {instId}: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Gets the current interest rates for all borrowed currencies (private endpoint).
         /// GET /api/v5/account/interest-rate
         /// Returns daily borrow rates per currency for the unified margin account.

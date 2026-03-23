@@ -649,16 +649,38 @@ namespace QuantConnect.Brokerages.OKX
         private void LoadInitialFundingRate(Symbol symbol)
         {
             var instId = _symbolMapper.GetBrokerageSymbol(symbol);
+            var svc = BrokerageDataService.Instance;
+
+            // Phase 1: Backfill history (oldest → newest) for EMA calculation
+            try
+            {
+                var history = RestApiClient.GetFundingRateHistory(instId, 100);
+                if (history != null && history.Count > 0)
+                {
+                    // OKX returns newest-first, reverse to feed oldest-first into BDS queue
+                    history.Reverse();
+                    foreach (var entry in history)
+                        svc.UpdateFundingRate(symbol, entry.ToFundingRate());
+
+                    Log.Trace($"{GetType().Name}.LoadInitialFundingRate({instId}): Backfilled {history.Count} historical FR entries");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{GetType().Name}.LoadInitialFundingRate({instId}): History backfill failed: {ex.Message}");
+            }
+
+            // Phase 2: Load current rate (overwrites snapshot to latest)
             try
             {
                 var fr = RestApiClient.GetFundingRate(instId);
                 if (fr == null)
                 {
-                    Log.Error($"{GetType().Name}.LoadInitialFundingRate({instId}): No data returned — will rely on WS push");
+                    Log.Error($"{GetType().Name}.LoadInitialFundingRate({instId}): No current data — will rely on WS push");
                     return;
                 }
-                BrokerageDataService.Instance.UpdateFundingRate(symbol, fr.ToFundingRate());
-                Log.Trace($"{GetType().Name}.LoadInitialFundingRate({instId}): Loaded rate={fr.FundingRateValue}");
+                svc.UpdateFundingRate(symbol, fr.ToFundingRate());
+                Log.Trace($"{GetType().Name}.LoadInitialFundingRate({instId}): Loaded current rate={fr.FundingRateValue}");
             }
             catch (Exception ex)
             {
