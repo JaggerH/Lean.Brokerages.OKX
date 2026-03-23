@@ -216,9 +216,13 @@ namespace QuantConnect.Brokerages.OKX
                     }
                 }
             }
-            catch { /* best-effort */ }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXConstraint.GetBorrowQuotaLimit({ctx.Symbol}): {ex.Message}");
+            }
 
-            return NoLimit;
+            // All data sources missed — block sell to prevent unbounded borrowing
+            return 0;
         }
 
         // ─── Instrument Cache ───

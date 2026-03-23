@@ -39,6 +39,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         private readonly RateGate _tradesRateLimiter;   // /market/trades: 100 requests per 2 seconds
         private readonly RateGate _priceLimitRateLimiter;  // /public/price-limit: 20 requests per 2 seconds
         private readonly RateGate _orderBookRateLimiter;  // /market/books: 40 requests per 2 seconds
+        private readonly RateGate _maxLoanRateLimiter;    // /account/max-loan: 20 requests per 2 seconds
 
         /// <summary>
         /// API prefix for OKX unified account (/api/v5)
@@ -69,6 +70,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             _tradesRateLimiter = new RateGate(100, TimeSpan.FromSeconds(2));
             _priceLimitRateLimiter = new RateGate(20, TimeSpan.FromSeconds(2));
             _orderBookRateLimiter = new RateGate(40, TimeSpan.FromSeconds(2));
+            _maxLoanRateLimiter = new RateGate(20, TimeSpan.FromSeconds(2));
         }
 
         /// <summary>
@@ -855,6 +857,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         /// <returns>List of MaxLoanRecord (typically 2: one per side), or empty list on failure.</returns>
         public List<MaxLoanRecord> GetMaxLoan(string instId, string mgnMode = "cross")
         {
+            _maxLoanRateLimiter?.WaitToProceed();
             try
             {
                 var response = Get<OKXApiResponse<MaxLoanRecord>>(
