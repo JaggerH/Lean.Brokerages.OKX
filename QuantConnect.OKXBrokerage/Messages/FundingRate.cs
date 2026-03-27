@@ -62,6 +62,22 @@ namespace QuantConnect.Brokerages.OKX.Messages
         [JsonProperty("ts")]
         public string Ts { get; set; }
 
+        /// <summary>Current premium index (decimal string, e.g. "-0.0002").</summary>
+        [JsonProperty("premium")]
+        public string Premium { get; set; }
+
+        /// <summary>Interest rate per period (decimal string, e.g. "0.0001").</summary>
+        [JsonProperty("interestRate")]
+        public string InterestRateValue { get; set; }
+
+        /// <summary>Minimum funding rate (decimal string, e.g. "-0.00375").</summary>
+        [JsonProperty("minFundingRate")]
+        public string MinFundingRate { get; set; }
+
+        /// <summary>Maximum funding rate (decimal string, e.g. "0.00375").</summary>
+        [JsonProperty("maxFundingRate")]
+        public string MaxFundingRate { get; set; }
+
         /// <summary>
         /// Converts this message to a <see cref="BrokerageDataService.FundingRate"/>.
         /// When <see cref="NextFundingRate"/> is empty, <c>NextRate</c> is set to zero
@@ -85,7 +101,11 @@ namespace QuantConnect.Brokerages.OKX.Messages
                 NextRate = ParseDecimal(NextFundingRate),
                 SettlementTime = ParseMs(FundingTime),
                 NextSettlementTime = ParseMs(NextFundingTime),
-                UpdatedAt = updatedAt == default ? DateTime.UtcNow : updatedAt
+                UpdatedAt = updatedAt == default ? DateTime.UtcNow : updatedAt,
+                PremiumIndex = ParseDecimal(Premium),
+                InterestRate = ParseDecimal(InterestRateValue),
+                MinFundingRate = ParseDecimal(MinFundingRate),
+                MaxFundingRate = ParseDecimal(MaxFundingRate)
             };
         }
     }
