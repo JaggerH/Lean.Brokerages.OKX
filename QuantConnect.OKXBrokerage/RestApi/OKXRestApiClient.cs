@@ -40,6 +40,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
         private readonly RateGate _priceLimitRateLimiter;  // /public/price-limit: 20 requests per 2 seconds
         private readonly RateGate _orderBookRateLimiter;  // /market/books: 40 requests per 2 seconds
         private readonly RateGate _maxLoanRateLimiter;    // /account/max-loan: 20 requests per 2 seconds
+        private readonly RateGate _premiumRateLimiter;   // /public/premium-history: 20 requests per 2 seconds
 
         /// <summary>
         /// API prefix for OKX unified account (/api/v5)
@@ -71,6 +72,7 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             _priceLimitRateLimiter = new RateGate(20, TimeSpan.FromSeconds(2));
             _orderBookRateLimiter = new RateGate(40, TimeSpan.FromSeconds(2));
             _maxLoanRateLimiter = new RateGate(20, TimeSpan.FromSeconds(2));
+            _premiumRateLimiter = new RateGate(20, TimeSpan.FromSeconds(2));
         }
 
         /// <summary>
@@ -782,6 +784,48 @@ namespace QuantConnect.Brokerages.OKX.RestApi
             catch (Exception ex)
             {
                 Log.Error($"OKXRestApiClient.GetFundingRateHistory(): Exception for {instId}: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets premium index history for a SWAP instrument (public endpoint, no auth).
+        /// GET /api/v5/public/premium-history?instId={instId}&amp;before={before}&amp;limit=100
+        /// Returns up to 100 minute-level records before the given timestamp.
+        /// Rate-limited: 20 requests per 2 seconds.
+        /// </summary>
+        /// <param name="instId">OKX instrument ID, e.g. "BTC-USDT-SWAP".</param>
+        /// <param name="beforeMs">Return records before this timestamp (Unix ms, exclusive). 0 = omit.</param>
+        /// <param name="afterMs">Return records after this timestamp (Unix ms, exclusive). 0 = omit.</param>
+        /// <param name="limit">Maximum number of records (max 100, default 100).</param>
+        /// <returns>List of premium history entries, or null if the request fails.</returns>
+        public List<PremiumHistory> GetPremiumHistory(string instId, long beforeMs = 0, long afterMs = 0, int limit = 100)
+        {
+            _premiumRateLimiter.WaitToProceed();
+            try
+            {
+                var qs = $"instId={instId}&limit={limit}";
+                if (beforeMs > 0)
+                    qs += $"&before={beforeMs}";
+                if (afterMs > 0)
+                    qs += $"&after={afterMs}";
+
+                var response = GetPublic<OKXApiResponse<PremiumHistory>>(
+                    "/public/premium-history",
+                    qs,
+                    defaultValue: null);
+
+                if (response == null || !response.IsSuccess || response.Data == null)
+                {
+                    Log.Error($"OKXRestApiClient.GetPremiumHistory(): Failed for {instId} - code: {response?.Code}, msg: {response?.Message}");
+                    return null;
+                }
+
+                return response.Data;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXRestApiClient.GetPremiumHistory(): Exception for {instId}: {ex.Message}");
                 return null;
             }
         }
