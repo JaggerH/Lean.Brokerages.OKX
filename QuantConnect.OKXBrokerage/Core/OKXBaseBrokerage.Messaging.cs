@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Collections.Concurrent;
 using System.Globalization;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -328,10 +329,17 @@ namespace QuantConnect.Brokerages.OKX
         }
 
         /// <summary>
+        /// Per-symbol tracking for funding rate WS handler:
+        /// last snapshot (for NextRate preservation) and last settled fundingTime (for dedup).
+        /// </summary>
+        private readonly ConcurrentDictionary<Symbol, BrokerageDataService.FundingRate> _lastFundingRate = new();
+        private readonly ConcurrentDictionary<Symbol, string> _lastSettledFundingTime = new();
+
+        /// <summary>
         /// Handles funding-rate channel push for SWAP instruments.
         /// Channel: funding-rate (public)
-        /// Updates BrokerageDataService with the latest funding rate for each instrument in the message.
-        /// When nextFundingRate is an empty string, NextRate is set to zero — callers should preserve the prior value if needed.
+        /// Emits FundingRateSettled on settlement detection (settState=processing + new fundingTime).
+        /// Emits FundingRateUpdated on every push.
         /// </summary>
         protected virtual void HandleFundingRateChannel(JObject jObject)
         {
@@ -339,6 +347,8 @@ namespace QuantConnect.Brokerages.OKX
             {
                 var message = jObject.ToObject<WebSocketDataMessage<FundingRate>>();
                 if (message?.Data == null) return;
+
+                var svc = BrokerageDataService.Instance;
 
                 foreach (var fr in message.Data)
                 {
@@ -348,14 +358,11 @@ namespace QuantConnect.Brokerages.OKX
                     try { symbol = _symbolMapper.GetLeanSymbol(fr.InstId); }
                     catch { continue; }
 
-                    // If nextFundingRate is empty, preserve the existing NextRate rather than overwriting with zero.
-                    // Note: TryGetFundingRate + UpdateFundingRate is not atomic; in the rare case where
-                    // LoadInitialFundingRate writes between these two calls, the preserved value may be
-                    // one update stale — accepted eventual-consistency trade-off for a predicted rate.
+                    // Build entry, preserving NextRate from last snapshot when WS omits it
                     var parsed = fr.ToFundingRate();
                     BrokerageDataService.FundingRate entry;
                     if (string.IsNullOrEmpty(fr.NextFundingRate) &&
-                        BrokerageDataService.Instance.TryGetFundingRate(symbol, out var existing))
+                        _lastFundingRate.TryGetValue(symbol, out var existing))
                     {
                         entry = new BrokerageDataService.FundingRate
                         {
@@ -363,15 +370,35 @@ namespace QuantConnect.Brokerages.OKX
                             NextRate = existing.NextRate,
                             SettlementTime = parsed.SettlementTime,
                             NextSettlementTime = existing.NextSettlementTime,
-                            UpdatedAt = parsed.UpdatedAt
+                            UpdatedAt = parsed.UpdatedAt,
+                            PremiumIndex = parsed.PremiumIndex,
+                            InterestRate = parsed.InterestRate,
+                            MinFundingRate = parsed.MinFundingRate,
+                            MaxFundingRate = parsed.MaxFundingRate
                         };
                     }
                     else
                     {
                         entry = parsed;
                     }
+                    _lastFundingRate[symbol] = entry;
 
-                    BrokerageDataService.Instance.UpdateFundingRate(symbol, entry);
+                    // Settlement detection: settState="processing" + new fundingTime
+                    if (fr.SettState == "processing" && !string.IsNullOrEmpty(fr.FundingTime))
+                    {
+                        var prev = _lastSettledFundingTime.GetOrAdd(symbol, string.Empty);
+                        if (fr.FundingTime != prev && !string.IsNullOrEmpty(fr.SettFundingRate))
+                        {
+                            _lastSettledFundingTime[symbol] = fr.FundingTime;
+                            var settledRate = decimal.TryParse(fr.SettFundingRate,
+                                System.Globalization.NumberStyles.Any,
+                                System.Globalization.CultureInfo.InvariantCulture, out var r) ? r : 0m;
+                            svc.EmitFundingRateSettled(symbol, settledRate, entry.SettlementTime);
+                        }
+                    }
+
+                    // Always emit update
+                    svc.EmitFundingRateUpdated(symbol, entry);
                 }
             }
             catch (Exception ex)

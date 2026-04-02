@@ -40,7 +40,7 @@ namespace QuantConnect.Brokerages.OKX
     /// Provides common WebSocket management, order state tracking, and data handling
     /// Eliminates IsFuturesModel checks in favor of proper OOP via virtual methods
     /// </summary>
-    public abstract partial class OKXBaseBrokerage : BaseWebsocketsBrokerage, IDataQueueHandler, IDataQueueUniverseProvider, IExecutionHistoryProvider, IInterestSettlementProvider
+    public abstract partial class OKXBaseBrokerage : BaseWebsocketsBrokerage, IDataQueueHandler, IDataQueueUniverseProvider, IExecutionHistoryProvider, IInterestSettlementProvider, IFundingRateHistoryProvider
     {
         // ========================================
         // CONSTANTS
@@ -540,6 +540,40 @@ namespace QuantConnect.Brokerages.OKX
             }
         }
 
+        /// <summary>
+        /// IFundingRateHistoryProvider implementation.
+        /// Fetches settled funding rate history via OKX REST API and converts to LEAN FundingRateRecord.
+        /// </summary>
+        public List<FundingRateRecord> GetFundingRateHistory(Symbol symbol, int limit = 100)
+        {
+            var instId = _symbolMapper.GetBrokerageSymbol(symbol);
+            try
+            {
+                var history = RestApiClient.GetFundingRateHistory(instId, limit);
+                if (history == null || history.Count == 0)
+                {
+                    return new List<FundingRateRecord>();
+                }
+
+                var result = new List<FundingRateRecord>(history.Count);
+                foreach (var entry in history)
+                {
+                    var converted = entry.ToFundingRate();
+                    result.Add(new FundingRateRecord
+                    {
+                        Rate = converted.CurrentRate,
+                        SettlementTimeUtc = converted.SettlementTime
+                    });
+                }
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXBaseBrokerage.GetFundingRateHistory({instId}): {ex.Message}");
+                return new List<FundingRateRecord>();
+            }
+        }
+
         // ========================================
         // SUBSCRIPTIONMANAGER CALLBACKS
         // ========================================
@@ -627,9 +661,6 @@ namespace QuantConnect.Brokerages.OKX
                         }
                     };
                     webSocket.Send(JsonConvert.SerializeObject(fundingRateSubscribeMessage));
-
-                    // Load initial snapshot asynchronously so we don't block WS message processing
-                    Task.Run(() => LoadInitialFundingRate(symbol));
                 }
 
                 return true;
@@ -638,53 +669,6 @@ namespace QuantConnect.Brokerages.OKX
             {
                 Log.Error($"{GetType().Name}.Subscribe({symbol}): {ex}");
                 return false;
-            }
-        }
-
-        /// <summary>
-        /// Fetches the initial funding rate snapshot via REST for a SWAP instrument and writes it to BrokerageDataService.
-        /// Called asynchronously from Subscribe() to avoid blocking WS message processing.
-        /// </summary>
-        /// <param name="symbol">LEAN symbol for the perpetual instrument.</param>
-        private void LoadInitialFundingRate(Symbol symbol)
-        {
-            var instId = _symbolMapper.GetBrokerageSymbol(symbol);
-            var svc = BrokerageDataService.Instance;
-
-            // Phase 1: Backfill history (oldest → newest) for EMA calculation
-            try
-            {
-                var history = RestApiClient.GetFundingRateHistory(instId, 100);
-                if (history != null && history.Count > 0)
-                {
-                    // OKX returns newest-first, reverse to feed oldest-first into BDS queue
-                    history.Reverse();
-                    foreach (var entry in history)
-                        svc.UpdateFundingRate(symbol, entry.ToFundingRate());
-
-                    Log.Trace($"{GetType().Name}.LoadInitialFundingRate({instId}): Backfilled {history.Count} historical FR entries");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.LoadInitialFundingRate({instId}): History backfill failed: {ex.Message}");
-            }
-
-            // Phase 2: Load current rate (overwrites snapshot to latest)
-            try
-            {
-                var fr = RestApiClient.GetFundingRate(instId);
-                if (fr == null)
-                {
-                    Log.Error($"{GetType().Name}.LoadInitialFundingRate({instId}): No current data — will rely on WS push");
-                    return;
-                }
-                svc.UpdateFundingRate(symbol, fr.ToFundingRate());
-                Log.Trace($"{GetType().Name}.LoadInitialFundingRate({instId}): Loaded current rate={fr.FundingRateValue}");
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{GetType().Name}.LoadInitialFundingRate({instId}): Exception: {ex.Message}");
             }
         }
 

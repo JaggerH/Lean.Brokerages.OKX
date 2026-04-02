@@ -78,6 +78,17 @@ namespace QuantConnect.Brokerages.OKX.Messages
         [JsonProperty("maxFundingRate")]
         public string MaxFundingRate { get; set; }
 
+        /// <summary>Settlement state: "processing" (settling now) or "settled" (done).</summary>
+        [JsonProperty("settState")]
+        public string SettState { get; set; }
+
+        /// <summary>
+        /// If settState=processing: the rate used for this settlement.
+        /// If settState=settled: the rate used for the last settlement.
+        /// </summary>
+        [JsonProperty("settFundingRate")]
+        public string SettFundingRate { get; set; }
+
         /// <summary>
         /// Converts this message to a <see cref="BrokerageDataService.FundingRate"/>.
         /// When <see cref="NextFundingRate"/> is empty, <c>NextRate</c> is set to zero
