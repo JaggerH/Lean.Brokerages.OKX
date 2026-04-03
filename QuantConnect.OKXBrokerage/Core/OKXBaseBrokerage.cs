@@ -574,6 +574,98 @@ namespace QuantConnect.Brokerages.OKX
             }
         }
 
+        /// <summary>
+        /// Shared semaphore for premium history fetching across all symbols.
+        /// Limits total in-flight REST requests to avoid thread pool starvation
+        /// when multiple symbols warm up concurrently. Rate limiter handles req/s throttling.
+        /// </summary>
+        private readonly System.Threading.SemaphoreSlim _premiumFetchSemaphore = new(10);
+
+        /// <summary>
+        /// IFundingRateHistoryProvider implementation.
+        /// Fetches minute-level premium index history via OKX REST API for the given time range.
+        /// Pre-computes page boundaries (~100 min/page), fetches with bounded parallelism
+        /// (shared semaphore across all symbols), retries failed pages, merges oldest-first.
+        /// </summary>
+        public List<PremiumRecord> GetPremiumHistory(Symbol symbol, DateTime startUtc, DateTime endUtc)
+        {
+            var instId = _symbolMapper.GetBrokerageSymbol(symbol);
+            var startMs = new DateTimeOffset(startUtc).ToUnixTimeMilliseconds();
+            var endMs = new DateTimeOffset(endUtc).ToUnixTimeMilliseconds();
+
+            if (endMs <= startMs) return new List<PremiumRecord>();
+
+            try
+            {
+                // OKX: 100 records/page, ~1 record/min → each page covers ~100 min.
+                const long pageSpanMs = 100 * 60 * 1000L;
+                var pages = new List<(long after, long before)>();
+                for (long cursor = startMs; cursor < endMs; cursor += pageSpanMs)
+                {
+                    pages.Add((cursor, Math.Min(cursor + pageSpanMs, endMs)));
+                }
+
+                // Bounded parallel fetch: semaphore caps total in-flight requests across all
+                // concurrent GetPremiumHistory calls (e.g., 20 symbols warming up simultaneously).
+                // Rate limiter in RestApiClient separately throttles to 20 req/2s.
+                const int maxRetries = 2;
+                var bags = new System.Collections.Concurrent.ConcurrentBag<List<Messages.PremiumHistory>>();
+
+                Parallel.ForEach(pages, new ParallelOptions { MaxDegreeOfParallelism = 5 }, page =>
+                {
+                    _premiumFetchSemaphore.Wait();
+                    try
+                    {
+                        for (int attempt = 0; attempt <= maxRetries; attempt++)
+                        {
+                            var data = RestApiClient.GetPremiumHistory(instId, afterMs: page.after, beforeMs: page.before + 1);
+                            if (data != null)
+                            {
+                                bags.Add(data);
+                                return;
+                            }
+                            if (attempt < maxRetries)
+                                System.Threading.Thread.Sleep(500 * (attempt + 1));
+                        }
+                    }
+                    finally
+                    {
+                        _premiumFetchSemaphore.Release();
+                    }
+                });
+
+                // Merge, parse, deduplicate by timestamp, sort oldest-first
+                var seen = new HashSet<long>();
+                var result = new List<PremiumRecord>();
+                foreach (var pageData in bags)
+                {
+                    foreach (var entry in pageData)
+                    {
+                        if (!long.TryParse(entry.Timestamp, out var tsMs)) continue;
+                        if (tsMs <= startMs || tsMs > endMs) continue;
+                        if (!seen.Add(tsMs)) continue;
+                        if (!decimal.TryParse(entry.Premium, System.Globalization.NumberStyles.Any,
+                            System.Globalization.CultureInfo.InvariantCulture, out var premium)) continue;
+
+                        result.Add(new PremiumRecord
+                        {
+                            Premium = premium,
+                            TimestampUtc = DateTimeOffset.FromUnixTimeMilliseconds(tsMs).UtcDateTime
+                        });
+                    }
+                }
+
+                result.Sort((a, b) => a.TimestampUtc.CompareTo(b.TimestampUtc));
+                Log.Trace($"OKXBaseBrokerage.GetPremiumHistory({instId}): {result.Count} records, {pages.Count} pages");
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OKXBaseBrokerage.GetPremiumHistory({instId}): {ex.Message}");
+                return new List<PremiumRecord>();
+            }
+        }
+
         // ========================================
         // SUBSCRIPTIONMANAGER CALLBACKS
         // ========================================
